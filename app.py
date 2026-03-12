@@ -216,11 +216,16 @@ def auth_callback():
         error_msg = f"No Facebook Pages found on your account. Meta API Response: {json.dumps(pages_data)}"
         return render_template('index.html', error=error_msg), 400
 
-    # Use the first page (production note: let user choose if they manage multiple)
-    first_page        = pages[0]
-    page_name         = first_page.get('name')
-    page_id           = first_page.get('id')
-    page_access_token = first_page.get('access_token')
+    # Try to find the 'Nanovate' page specifically, otherwise fallback to the first one
+    target_page = pages[0]
+    for p in pages:
+        if 'nanovate' in p.get('name', '').strip().lower():
+            target_page = p
+            break
+
+    page_name         = target_page.get('name')
+    page_id           = target_page.get('id')
+    page_access_token = target_page.get('access_token')
 
     logger.info("Connected page: %s (ID: %s)", page_name, page_id)
 
