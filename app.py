@@ -11,8 +11,7 @@ import hmac
 import hashlib
 import requests
 
-from flask import Flask, redirect, request, session, render_template, jsonify, abort
-from urllib.parse import quote
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session, send_from_directory
 from dotenv import load_dotenv
 
 # ─── Load .env (local dev only; on AWS use Parameter Store / Env Vars) ────────
@@ -324,7 +323,10 @@ def connect_specific_page(page_id):
         session['page_access_token'] = page_access_token
         
         # SAVE TOKEN PERSISTENTLY FOR AUTO-RESPONDER
-        save_page_token(page_id, page_access_token)
+        try:
+            save_page_token(page_id, page_access_token)
+        except Exception as e:
+            logger.error("Error saving page token: %s", e)
         
         return redirect(url_for('dashboard'))
     else:
