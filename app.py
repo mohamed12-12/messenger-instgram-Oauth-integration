@@ -63,6 +63,7 @@ GRAPH_BASE    = f'https://graph.facebook.com/{GRAPH_VERSION}'
 
 # ─── Persistent Config for Auto-Response ──────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
+TOKEN_FILE  = os.path.join(os.path.dirname(__file__), 'page_tokens.json')
 
 def load_config():
     if not os.path.exists(CONFIG_FILE): return {'auto_response': False}
@@ -72,6 +73,23 @@ def load_config():
 
 def save_config(cfg):
     with open(CONFIG_FILE, 'w') as f: json.dump(cfg, f)
+
+def save_page_token(page_id, token):
+    tokens = {}
+    if os.path.exists(TOKEN_FILE):
+        try:
+            with open(TOKEN_FILE, 'r') as f: tokens = json.load(f)
+        except: pass
+    tokens[page_id] = token
+    with open(TOKEN_FILE, 'w') as f: json.dump(tokens, f)
+
+def get_page_token(page_id):
+    if not os.path.exists(TOKEN_FILE): return None
+    try:
+        with open(TOKEN_FILE, 'r') as f:
+            tokens = json.load(f)
+            return tokens.get(page_id)
+    except: return None
 
 # ─── File-Based Store for Demo (Safe for Multi-Worker Gunicorn) ────────────────
 SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_show_list'
@@ -304,7 +322,11 @@ def connect_specific_page(page_id):
         session['connected_page_id'] = page_id
         session['connected_page_name'] = page_name
         session['page_access_token'] = page_access_token
-        return redirect('/dashboard')
+        
+        # SAVE TOKEN PERSISTENTLY FOR AUTO-RESPONDER
+        save_page_token(page_id, page_access_token)
+        
+        return redirect(url_for('dashboard'))
     else:
         return render_template('index.html', error='Failed to subscribe the page to webhooks.'), 500
 
@@ -446,18 +468,17 @@ def webhook_event():
                 # CHECK AUTO-RESPONSE CONFIG
                 config = load_config()
                 if config.get('auto_response'):
-                    # To send an auto-reply, we need the Page Access Token.
-                    # In a real app, you'd fetch this from a database. 
-                    # For this demo, we'll try to use the one in the session (if it hit the same worker)
-                    # or skip if not found. High-end apps would have a DB lookup here.
-                    token = session.get('page_access_token')
+                    # Retrieve the token from our persistent store
+                    token = get_page_token(page_id)
                     if token:
-                        logger.info("Sending AUTO-RESPONSE to %s", sender_id)
+                        logger.info("Sending AUTO-RESPONSE to %s using stored token", sender_id)
                         send_graph_message(
                             sender_id, 
                             "Hello! This is a Nanovate Auto-Response. We have received your message and our AI agents are processing it now. Thank you for your patience!", 
                             token
                         )
+                    else:
+                        logger.warning("No stored token found for page %s to send auto-reply", page_id)
 
         return jsonify({'status': 'EVENT_RECEIVED'}), 200
 
