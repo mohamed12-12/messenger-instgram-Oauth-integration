@@ -5,8 +5,9 @@ Designed for AWS deployment (Elastic Beanstalk / EC2 + ALB / ECS)
 
 import os
 import json
+import uuid
+import time
 import logging
-import secrets
 import hmac
 import hashlib
 import requests
