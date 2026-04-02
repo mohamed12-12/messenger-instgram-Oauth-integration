@@ -64,6 +64,11 @@ GRAPH_BASE    = f'https://graph.facebook.com/{GRAPH_VERSION}'
 # Permissions requested from the user
 SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_show_list'
 
+# ─── Simple In-Memory Store for Demo ──────────────────────────────────────────
+# In a real app, use Redis or a Database. For App Review demos, this is fine.
+RECENT_MESSAGES = []
+MAX_RECENT = 10
+
 
 # ─── HELPER: Verify Meta Webhook Signature ────────────────────────────────────
 def verify_webhook_signature(payload: bytes, signature_header: str) -> bool:
@@ -201,9 +206,23 @@ def auth_callback():
         logger.error("No access token in token response: %s", token_data)
         return render_template('index.html', error='Could not retrieve access token.'), 502
 
+    session['user_access_token'] = user_access_token
     logger.info("User access token obtained successfully.")
 
-    # Fetch Pages the user manages
+    return redirect('/select-page')
+
+
+# ─── Page Selection ──────────────────────────────────────────────────────────
+@app.route('/select-page')
+def select_page():
+    """
+    Lists the Facebook Pages the user manages so they can select one.
+    This satisfies the 'Asset Selection' requirement for Meta App Review.
+    """
+    user_access_token = session.get('user_access_token')
+    if not user_access_token:
+        return redirect('/')
+
     try:
         pages_data = graph_get('me/accounts', {'access_token': user_access_token})
     except requests.RequestException as exc:
@@ -211,32 +230,108 @@ def auth_callback():
         return render_template('index.html', error='Failed to fetch your Facebook Pages.'), 502
 
     pages = pages_data.get('data', [])
-    if not pages:
-        logger.warning("No Facebook Pages found for this user. Raw response: %s", pages_data)
-        # User requested to bypass the error and show the success message anyway
-        return render_template('success.html', page_name='Nanovate', page_id=None)
+    return render_template('select_page.html', pages=pages)
 
-    # Try to find the 'Nanovate' page specifically, otherwise fallback to the first one
-    target_page = pages[0]
-    for p in pages:
-        if 'nanovate' in p.get('name', '').strip().lower():
-            target_page = p
-            break
 
-    page_name         = target_page.get('name')
-    page_id           = target_page.get('id')
-    page_access_token = target_page.get('access_token')
+# ─── Connect Selected Page ────────────────────────────────────────────────────
+@app.route('/connect-page/<page_id>')
+def connect_specific_page(page_id):
+    """
+    Subscribes the selected page to the webhook and shows the dashboard.
+    """
+    user_access_token = session.get('user_access_token')
+    if not user_access_token:
+        return redirect('/')
 
-    logger.info("Connected page: %s (ID: %s)", page_name, page_id)
+    try:
+        # Fetch the specific page to get its access token
+        page_data = graph_get(page_id, {
+            'fields': 'name,access_token',
+            'access_token': user_access_token
+        })
+    except requests.RequestException as exc:
+        logger.error("Failed to fetch page details: %s", exc)
+        return render_template('index.html', error='Failed to connect the selected page.'), 502
 
-    # TODO: Persist page_access_token securely
-    # e.g. AWS Secrets Manager, RDS, DynamoDB:
-    #   db.save_token(user_id=..., page_id=page_id, token=page_access_token)
+    page_name = page_data.get('name')
+    page_access_token = page_data.get('access_token')
 
     # Subscribe page to webhook
-    subscribe_page_to_webhook(page_id, page_access_token)
+    success = subscribe_page_to_webhook(page_id, page_access_token)
 
-    return render_template('success.html', page_name=page_name, page_id=page_id)
+    if success:
+        session['connected_page_id'] = page_id
+        session['connected_page_name'] = page_name
+        session['page_access_token'] = page_access_token
+        return redirect('/dashboard')
+    else:
+        return render_template('index.html', error='Failed to subscribe the page to webhooks.'), 500
+
+
+# ─── Dashboard (Live Send Action) ─────────────────────────────────────────────
+@app.route('/dashboard')
+def dashboard():
+    """
+    The main app UI showing the connected asset and the live send action.
+    """
+    page_id = session.get('connected_page_id')
+    page_name = session.get('connected_page_name')
+
+    if not page_id:
+        return redirect('/')
+
+    # Filter messages for this specific page
+    page_messages = [m for m in RECENT_MESSAGES if m.get('page_id') == page_id]
+
+    return render_template('dashboard.html', 
+                          page_name=page_name, 
+                          page_id=page_id,
+                          recent_messages=page_messages)
+
+
+# ─── Get Recent Messages AJAX ─────────────────────────────────────────────────
+@app.route('/api/recent-messages')
+def get_recent_messages():
+    page_id = session.get('connected_page_id')
+    if not page_id:
+        return jsonify([])
+    
+    # Filter messages for this specific page
+    page_messages = [m for m in RECENT_MESSAGES if m.get('page_id') == page_id]
+    return jsonify(page_messages)
+
+
+# ─── Send Message API ──────────────────────────────────────────────────────────
+@app.route('/send-message', methods=['POST'])
+def send_message():
+    """
+    Sends a message via the Meta Send API.
+    Demonstrates the 'Live Send Action' for App Review.
+    """
+    recipient_id = request.form.get('recipient_id')
+    message_text = request.form.get('message')
+    page_access_token = session.get('page_access_token')
+
+    if not recipient_id or not message_text or not page_access_token:
+        return jsonify({'error': 'Missing data'}), 400
+
+    try:
+        resp = requests.post(
+            f'{GRAPH_BASE}/me/messages',
+            params={'access_token': page_access_token},
+            json={
+                'recipient': {'id': recipient_id},
+                'message': {'text': message_text}
+            },
+            timeout=10
+        )
+        result = resp.json()
+        if resp.status_code == 200:
+            return jsonify({'success': True, 'result': result})
+        else:
+            return jsonify({'success': False, 'error': result}), resp.status_code
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ─── Webhook Verification (Meta GET challenge) ────────────────────────────────
@@ -290,6 +385,18 @@ def webhook_event():
                     "Message received – Page: %s | Sender: %s | Text: %s",
                     page_id, sender_id, text
                 )
+
+                # Store for "Live Dashboard" experience
+                RECENT_MESSAGES.insert(0, {
+                    'page_id': page_id,
+                    'sender_id': sender_id,
+                    'text': text,
+                    'timestamp': event.get('timestamp')
+                })
+                
+                # Keep list short
+                if len(RECENT_MESSAGES) > MAX_RECENT:
+                    RECENT_MESSAGES.pop()
 
                 # TODO: Route to your message handler / Lambda / SQS queue:
                 # handle_message(page_id, sender_id, text)
