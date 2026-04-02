@@ -158,6 +158,14 @@ def send_graph_message(recipient_id: str, text: str, page_access_token: str) -> 
     return resp.json()
 
 
+# ─── HELPER: Safe Graph API GET ───────────────────────────────────────────────
+def graph_get(path: str, params: dict) -> dict:
+    """Makes a GET request to the Facebook Graph API with a timeout."""
+    resp = requests.get(f'{GRAPH_BASE}/{path}', params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  ROUTES
 # ══════════════════════════════════════════════════════════════════════════════
