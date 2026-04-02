@@ -75,10 +75,14 @@ def load_messages():
     except: return []
 
 def save_message(msg):
-    msgs = load_messages()
-    msgs.insert(0, msg)
-    msgs = msgs[:MAX_RECENT]
-    with open(MESSAGES_FILE, 'w') as f: json.dump(msgs, f)
+    try:
+        msgs = load_messages()
+        msgs.insert(0, msg)
+        msgs = msgs[:MAX_RECENT]
+        with open(MESSAGES_FILE, 'w') as f: json.dump(msgs, f)
+        logger.info("Message saved successfully to %s", MESSAGES_FILE)
+    except Exception as e:
+        logger.error("CRITICAL: Failed to save message to file: %s", str(e))
 
 # ─── HELPER: Verify Meta Webhook Signature ────────────────────────────────────
 def verify_webhook_signature(payload: bytes, signature_header: str) -> bool:
@@ -144,6 +148,13 @@ def graph_get(path: str, params: dict) -> dict:
 def health():
     """AWS load balancer health check endpoint."""
     return jsonify({'status': 'ok'}), 200
+
+
+# ─── Ping/Diagnostic ──────────────────────────────────────────────────────────
+@app.route('/ping')
+def ping():
+    """Diagnostic to verify the build version on the server."""
+    return f"Nanovate Messenger Integration - Build: 2026-04-02-B", 200
 
 
 # ─── Root ─────────────────────────────────────────────────────────────────────
