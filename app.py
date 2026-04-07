@@ -220,12 +220,14 @@ def dashboard():
 def instagram_connect():
     state = secrets.token_urlsafe(16)
     session['oauth_state'] = state
+    # Added auth_type=rerequest to force the page selection dialog if they skipped it before
     fb_url = (
         "https://www.facebook.com/v22.0/dialog/oauth"
         f"?client_id={META_APP_ID}"
         f"&redirect_uri={INSTAGRAM_REDIRECT_URI}"
         f"&state={state}"
         f"&scope={INSTAGRAM_SCOPES}"
+        "&auth_type=rerequest"
     )
     return redirect(fb_url)
 
@@ -248,6 +250,9 @@ def instagram_auth_callback():
         
         # 2. Get Facebook Pages
         pages_data = graph_get('me/accounts', {'access_token': user_access_token})
+        
+        # Log the full response for debugging (sanitize in production)
+        logger.info(f"Pages data response: {json.dumps(pages_data)}")
         
         page_list_count = len(pages_data.get('data', []))
         logger.info(f"Retrieved {page_list_count} pages for user.")
@@ -390,6 +395,10 @@ def instagram_send():
 @app.route('/api/recent-messages')
 def get_recent_messages():
     return jsonify(load_messages())
+
+@app.route('/api/recent-instagram-messages')
+def get_recent_instagram_messages():
+    return jsonify(load_instagram_messages())
 
 @app.route('/api/toggle-auto-response', methods=['POST'])
 def toggle_auto_response():

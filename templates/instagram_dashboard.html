@@ -204,69 +204,79 @@
     </div>
 
     <div class="main">
-        <div class="status-badge">API Connected</div>
-        
-        <div class="ig-account-info">
-            <div class="ig-avatar">{{ username[0]|upper }}</div>
+        <!-- Section 1: Connected Account -->
+        <div class="card" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 32px; border: 1px solid #E1306C; margin-bottom: 24px;">
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="ig-avatar">{{ username[0]|upper }}</div>
+                <div>
+                    <h2 style="font-size: 20px; margin-bottom: 0;">@{{ username }}</h2>
+                    <span style="color: #6B7280; font-size: 14px;">Connected ID: <code>{{ account_id }}</code></span>
+                </div>
+            </div>
             <div>
-                <h2 style="font-size: 24px; margin-bottom: 4px;">@{{ username }}</h2>
-                <span style="color: #6B7280; font-size: 14px;">Connected as Instagram Business</span>
+                <span class="status-badge" style="background: #D1FAE5; color: #065F46; padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 13px;">● Connected</span>
             </div>
         </div>
 
         <div class="dashboard-grid">
             <div class="left-col">
+                <!-- Section 2: Send Message -->
                 <div class="card">
-                    <h2>Send Message</h2>
+                    <h2 style="font-size: 18px; margin-bottom: 20px;">Send Live Message from App UI</h2>
                     <form id="msgForm">
                         <div class="form-group">
                             <label class="label">Recipient PSID</label>
                             <input type="text" id="recipient_psid" name="recipient_psid" placeholder="Paste IG PSID here..." required>
+                            <p style="font-size: 12px; color: #6B7280; margin-top: 6px;">
+                                💡 <strong>What is PSID?</strong> The Page-Scoped ID (PSID) is a unique identifier for the conversation between your Instagram Page and a specific user. You can find this in the Incoming Feed column.
+                            </p>
                         </div>
                         <div class="form-group">
                             <label class="label">Message Content</label>
-                            <textarea id="message" name="message" rows="4" placeholder="Enter your response..." required></textarea>
+                            <textarea id="message" name="message" rows="4" placeholder="Enter your response to the user..." required></textarea>
                             <p style="font-size: 12px; color: #9CA3AF; margin-top: 8px;">
-                                * Automations disclosure will be added automatically.
+                                * Automations disclosure will be appended.
                             </p>
                         </div>
-                        <button type="submit" class="btn-send">Send Response</button>
+                        <button type="submit" class="btn-send" style="background: #0052ff;">Send Message Now</button>
                     </form>
-                    <div id="responseMsg" style="margin-top: 16px; font-size: 14px; text-align: center;"></div>
+                    <div id="responseMsg" style="margin-top: 16px; font-size: 14px; font-weight: 500; text-align: center;"></div>
                 </div>
             </div>
 
             <div class="right-col">
+                <!-- Section 3: Incoming Events -->
                 <div class="card">
-                    <h2>Incoming Feed</h2>
-                    <div class="message-list" id="msgFeed">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px;">
+                        <h2 style="font-size: 18px;">Incoming Feed (Live)</h2>
+                        <span id="syncStatus" style="font-size: 10px; color: #9CA3AF;">Syncing...</span>
+                    </div>
+                    <div class="message-list" id="msgFeed" style="min-height: 400px; border: 1px solid #F3F4F6; border-radius: 12px; padding: 12px; background: #fafafa;">
+                        <!-- messages will injected here via script -->
                         {% for msg in messages %}
                         <div class="message-item">
-                            <div class="sender-id">{{ msg.sender_id }}</div>
+                            <div class="sender-id">User PSID: {{ msg.sender_id }}</div>
                             <div class="message-text">{{ msg.text }}</div>
                             <div class="timestamp">{{ msg.timestamp }}</div>
                         </div>
-                        {% else %}
-                        <div style="text-align: center; color: #9CA3AF; padding: 40px 0;">
-                            No messages received yet.
-                        </div>
                         {% endfor %}
                     </div>
-                    <button onclick="window.location.reload()" style="background: none; border: none; color: #0052ff; cursor: pointer; margin-top: 16px; width: 100%; font-weight: 500;">
-                        Refresh Feed
-                    </button>
+                    <p style="font-size: 11px; color: #9CA3AF; margin-top: 12px; text-align: center;">
+                        Feed auto-updates every 3 seconds to capture live user messages.
+                    </p>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
+        // Send Message logic
         document.getElementById('msgForm').onsubmit = async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
             const statusDiv = document.getElementById('responseMsg');
             
-            statusDiv.innerHTML = "Sending...";
+            statusDiv.innerHTML = "Processing outbound message...";
             statusDiv.style.color = "#4B5563";
 
             try {
@@ -277,20 +287,50 @@
                 const data = await res.json();
                 
                 if(data.success) {
-                    statusDiv.innerHTML = "✓ Message sent successfully!";
+                    statusDiv.innerHTML = "✓ Message successfully delivered!";
                     statusDiv.style.color = "#059669";
                     e.target.reset();
-                    // Optional: reload after delay
-                    setTimeout(() => window.location.reload(), 2000);
+                    fetchMessages(); // refresh immediately
                 } else {
-                    statusDiv.innerHTML = "✗ Error: " + (data.error.error?.message || JSON.stringify(data.error));
+                    statusDiv.innerHTML = "✗ Delivery failed: " + (data.error.error?.message || JSON.stringify(data.error));
                     statusDiv.style.color = "#DC2626";
                 }
             } catch (err) {
-                statusDiv.innerHTML = "✗ Network Error";
+                statusDiv.innerHTML = "✗ Network Error connecting to API";
                 statusDiv.style.color = "#DC2626";
             }
         };
+
+        // Live Feed logic
+        async function fetchMessages() {
+            try {
+                const sync = document.getElementById('syncStatus');
+                sync.innerHTML = "Syncing...";
+                const res = await fetch('/api/recent-instagram-messages');
+                const data = await res.json();
+                const feed = document.getElementById('msgFeed');
+                
+                if(data.length === 0) {
+                   feed.innerHTML = '<div style="text-align: center; color: #9CA3AF; padding: 60px 0;">Wait for incoming messages...</div>';
+                } else {
+                    feed.innerHTML = data.map(msg => `
+                        <div class="message-item">
+                            <div class="sender-id">User PSID: ${msg.sender_id}</div>
+                            <div class="message-text">${msg.text}</div>
+                            <div class="timestamp" style="font-size: 10px; color: #9CA3AF; text-align: right; margin-top: 6px;">
+                                ${new Date(msg.timestamp).toLocaleString()}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+                sync.innerHTML = "Live Feed Sync: OK";
+            } catch (err) {
+                console.error("Feed error:", err);
+            }
+        }
+
+        // Initialize autoupdate
+        setInterval(fetchMessages, 3000); 
     </script>
 </body>
 </html>

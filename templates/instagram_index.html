@@ -109,14 +109,26 @@
         <div class="subtitle">AI Agent Platform</div>
         
         {% if error %}
-        <div class="error">{{ error }}</div>
+        <div class="error">
+            <p style="color: #c62828; font-weight: 600; margin-bottom: 8px;">Update Required</p>
+            {{ error }}
+            <div style="margin-top: 12px; font-size: 13px; text-align: left;">
+                <strong>Common fixes:</strong>
+                <ul style="margin: 8px 0; padding-left: 20px;">
+                    <li>Ensure you are a Developer/Tester of this Meta App.</li>
+                    <li>Select <strong>ALL</strong> pages in the Facebook popup.</li>
+                    <li>Ensure your Instagram is a <strong>Business/Creator</strong> account.</li>
+                    <li>Check if the Instagram account is linked to the <strong>Facebook Page</strong>.</li>
+                </ul>
+            </div>
+        </div>
         {% endif %}
 
         <h1>Connect Your Instagram</h1>
-        <p>Connect your Instagram Business Account to enable AI-powered messaging. To connect, your Instagram account must be linked to a Facebook Page.</p>
+        <p>Connect your Instagram Business account to your AI support agent to enable automated messaging and intelligent customer support.</p>
         
         <a href="/instagram/connect" class="btn-instagram">
-            Connect Instagram Business
+            Connect with Instagram
         </a>
     </div>
 </body>
