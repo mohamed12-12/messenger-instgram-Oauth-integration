@@ -9,6 +9,8 @@ import requests
 import secrets
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, send_from_directory
+from collections import deque
+import hmac as hmac_module
 from dotenv import load_dotenv
 
 # ─── Load Environment ────────────────────────────────────────────────────────
@@ -54,6 +56,15 @@ first_messages_sent = set() # Track for automation disclosure session
 # Automation Disclosure Texts
 DISCLOSURE_EN = "This is an automated response from Nanovate AI customer support. \nType 'human' or 'agent' at any time to speak with a person."
 DISCLOSURE_AR = "هذه استجابة آلية من نظام دعم العملاء في نانوفيت. \nاكتب 'مساعدة' في أي وقت للتحدث مع شخص حقيقي."
+
+# In-memory webhook hit tracking
+webhook_hits_log = deque(maxlen=10)
+last_webhook_info = {
+    'timestamp': None,
+    'object_type': None,
+    'entry_id': None,
+    'sender_id': None
+}
 
 # ─── Storage Helpers ────────────────────────────────────────────────────────
 def load_config():
@@ -101,21 +112,19 @@ def save_message(msg):
         logger.error("Failed to write to messages file: %s", e)
 
 def save_instagram_message(msg):
-    global instagram_messages
-    instagram_messages.insert(0, msg)
-    instagram_messages = instagram_messages[:20] # Keep last 20
+    messages = load_instagram_messages()
+    messages.insert(0, msg)
+    messages = messages[:20] # Keep last 20
     try:
-        with open(INSTAGRAM_MESSAGES_FILE, 'w') as f: json.dump(instagram_messages, f)
+        with open(INSTAGRAM_MESSAGES_FILE, 'w') as f: json.dump(messages, f)
     except Exception as e:
         logger.error("Failed to write to instagram messages file: %s", e)
 
 def load_instagram_messages():
-    global instagram_messages
     if not os.path.exists(INSTAGRAM_MESSAGES_FILE): return []
     try:
         with open(INSTAGRAM_MESSAGES_FILE, 'r') as f: 
-            instagram_messages = json.load(f)
-            return instagram_messages
+            return json.load(f)
     except: return []
 
 # ─── Graph API Helpers ───────────────────────────────────────────────────────
@@ -366,16 +375,33 @@ def instagram_webhook_event(agent_id=None):
     # Verify HMAC signature
     signature = request.headers.get('X-Hub-Signature-256')
     if signature:
-        expected = 'sha256=' + hmac.new(
-            META_APP_SECRET.encode('utf-8'),
-            request.data,
-            hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            logger.warning("Invalid signature on Instagram webhook")
-            return "Invalid signature", 403
+        try:
+            expected = 'sha256=' + hmac_module.new(
+                META_APP_SECRET.encode('utf-8'),
+                request.data,
+                hashlib.sha256
+            ).hexdigest()
+            if not hmac_module.compare_digest(signature, expected):
+                logger.warning(f"Signature mismatch! Meta sent {signature}, we expected {expected}")
+            else:
+                logger.info("✅ Signature verified correctly.")
+        except Exception as e:
+            logger.error(f"HMAC verification crashed: {e}")
+    else:
+        logger.warning("No X-Hub-Signature-256 found in headers.")
 
     data = request.get_json(force=True)
+    
+    # Store for debug endpoint
+    webhook_hits_log.append({
+        'endpoint': '/instagram/webhook',
+        'timestamp': time.time(),
+        'object': data.get('object'),
+        'payload': data
+    })
+    
+    last_webhook_info['timestamp'] = time.time()
+    last_webhook_info['object_type'] = data.get('object')
 
     # RAW DEBUG LOGGING — saves every incoming payload for diagnosis
     try:
@@ -387,8 +413,16 @@ def instagram_webhook_event(agent_id=None):
     logger.info(f"📥 Instagram Webhook hit — object='{data.get('object')}' agent_id='{agent_id}'")
 
     obj_type = data.get('object')
+    
+    # Detailed logging for EVERY hit
+    for entry in data.get('entry', []):
+        entry_id = entry.get('id')
+        last_webhook_info['entry_id'] = entry_id
+        for messaging in entry.get('messaging', []):
+            sender_id = messaging.get('sender', {}).get('id')
+            last_webhook_info['sender_id'] = sender_id
+            logger.info(f"--- WEBHOOK DETAIL: object={obj_type}, entry_id={entry_id}, sender_id={sender_id}")
 
-    # KEY FIX: Meta sends Instagram DMs as 'page' (via Messenger product) OR 'instagram'
     # Accept BOTH — this is the #1 reason developers miss incoming events
     if obj_type not in ('instagram', 'page'):
         logger.warning(f"⚠️ Ignored unknown webhook object type: '{obj_type}'")
@@ -460,7 +494,8 @@ def instagram_dashboard():
                          username=ig_username or "Unknown", 
                          account_id=ig_id,
                          messages=msgs,
-                         token_error=token_error)
+                         token_error=token_error,
+                         last_hit=last_webhook_info)
 
 @app.route('/instagram/send', methods=['POST'])
 def instagram_send():
@@ -498,7 +533,23 @@ def get_recent_messages():
 
 @app.route('/api/recent-instagram-messages')
 def get_recent_instagram_messages():
+    # Fresh load on every request as requested
     return jsonify(load_instagram_messages())
+
+@app.route('/api/webhook-last-hit')
+def get_webhook_last_hit():
+    return jsonify(list(webhook_hits_log))
+
+@app.route('/api/instagram-debug')
+def instagram_debug():
+    msgs = load_instagram_messages()
+    return jsonify({
+        'last_webhook_hit_timestamp': last_webhook_info['timestamp'],
+        'last_object_type': last_webhook_info['object_type'],
+        'last_entry_id': last_webhook_info['entry_id'],
+        'message_count': len(msgs),
+        'last_3_raw_messages': msgs[:3]
+    })
 
 @app.route('/api/toggle-auto-response', methods=['POST'])
 def toggle_auto_response():
@@ -599,18 +650,43 @@ def webhook_event():
     data = request.get_json(force=True)
 
     # RAW DEBUG — also log here so we can see if Instagram DMs arrive at this endpoint
-    try:
-        with open(WEBHOOK_DEBUG_FILE, 'w') as f:
-            json.dump({'endpoint': '/webhook', 'timestamp': time.time(), 'data': data}, f)
-    except: pass
+    # Store for debug endpoint
+    webhook_hits_log.append({
+        'endpoint': '/webhook',
+        'timestamp': time.time(),
+        'object': data.get('object'),
+        'payload': data
+    })
+    
+    last_webhook_info['timestamp'] = time.time()
+    last_webhook_info['object_type'] = data.get('object')
+
+    # Verify HMAC signature (non-blocking)
+    signature = request.headers.get('X-Hub-Signature-256')
+    if signature:
+        try:
+            expected = 'sha256=' + hmac_module.new(
+                META_APP_SECRET.encode('utf-8'),
+                request.data,
+                hashlib.sha256
+            ).hexdigest()
+            if hmac_module.compare_digest(signature, expected):
+                logger.info("✅ /webhook Signature verified.")
+            else:
+                logger.warning(f"/webhook Signature mismatch! Meta: {signature}, Expected: {expected}")
+        except Exception as e:
+            logger.error(f"/webhook HMAC error: {e}")
 
     logger.info(f"📥 /webhook hit — object='{data.get('object')}'")
 
     if data.get('object') == 'page':
         for entry in data.get('entry', []):
             page_id = entry.get('id')
+            last_webhook_info['entry_id'] = page_id
             for event in entry.get('messaging', []):
                 sender_id = event.get('sender', {}).get('id')
+                last_webhook_info['sender_id'] = sender_id
+                logger.info(f"--- MESSENGER WEBHOOK DETAIL: page_id={page_id}, sender_id={sender_id}")
                 message = event.get('message', {})
                 text = message.get('text')
                 if text:

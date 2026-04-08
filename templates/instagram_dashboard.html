@@ -204,6 +204,21 @@
     </div>
 
     <div class="main">
+        <!-- REAL-TIME WEBHOOK STATUS BANNER -->
+        <div id="webhook-banner" style="background: #111827; color: #10B981; padding: 12px 24px; border-radius: 12px; margin-bottom: 24px; font-family: monospace; font-size: 13px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #10B981;">
+            <div>
+                <span style="color: #9CA3AF;">LAST WEBHOOK HIT:</span> 
+                <span id="last-hit-time">{{ last_hit.timestamp if last_hit.timestamp else 'No hits yet' }}</span>
+            </div>
+            <div>
+                <span style="color: #9CA3AF;">SENDER:</span> 
+                <span id="last-hit-sender">{{ last_hit.sender_id if last_hit.sender_id else 'None' }}</span>
+            </div>
+            <div>
+                <span style="color: #9CA3AF;">TYPE:</span> 
+                <span id="last-hit-type" style="text-transform: uppercase;">{{ last_hit.object_type if last_hit.object_type else 'N/A' }}</span>
+            </div>
+        </div>
         <!-- Section 1: Connected Account -->
         <div class="card" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 32px; border: 1px solid #E1306C; margin-bottom: 24px;">
             <div style="display: flex; align-items: center; gap: 16px;">
@@ -314,6 +329,17 @@
             try {
                 const sync = document.getElementById('syncStatus');
                 sync.innerHTML = "Syncing...";
+                
+                // Fetch debug info
+                const debugRes = await fetch('/api/instagram-debug');
+                const debugData = await debugRes.json();
+                
+                if (debugData.last_webhook_hit_timestamp) {
+                    document.getElementById('last-hit-time').textContent = new Date(debugData.last_webhook_hit_timestamp * 1000).toLocaleTimeString();
+                    document.getElementById('last-hit-sender').textContent = debugData.last_entry_id || 'N/A';
+                    document.getElementById('last-hit-type').textContent = debugData.last_object_type || 'N/A';
+                }
+
                 const res = await fetch('/api/recent-instagram-messages');
                 const data = await res.json();
                 const feed = document.getElementById('msgFeed');
