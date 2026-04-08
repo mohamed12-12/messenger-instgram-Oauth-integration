@@ -48,6 +48,11 @@ INSTAGRAM_MESSAGES_FILE = os.path.join(os.path.dirname(__file__), 'instagram_mes
 
 # In-memory storage for last 20 instagram messages if file doesn't exist
 instagram_messages = []
+first_messages_sent = set() # Track for automation disclosure session
+
+# Automation Disclosure Texts
+DISCLOSURE_EN = "This is an automated response from Nanovate AI customer support. \nType 'human' or 'agent' at any time to speak with a person."
+DISCLOSURE_AR = "هذه استجابة آلية من نظام دعم العملاء في نانوفيت. \nاكتب 'مساعدة' في أي وقت للتحدث مع شخص حقيقي."
 
 # ─── Storage Helpers ────────────────────────────────────────────────────────
 def load_config():
@@ -145,6 +150,34 @@ def graph_get(path: str, params: dict) -> dict:
     resp = requests.get(f'{GRAPH_BASE}/{path}', params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+# ─── Agent & AI Helpers ──────────────────────────────────────────────────────
+def get_chat_agent_by_id(agent_id: str):
+    """
+    Mock helper to get agent data. In a real app, this would fetch from a database.
+    We'll return the current session's instagram token if available.
+    """
+    token = session.get('instagram_page_token') or get_page_token(session.get('instagram_account_id'))
+    return {
+        "id": agent_id,
+        "name": "Nanovate AI",
+        "instagram_token": token
+    }
+
+async def generate_response(text: str, agent_data: dict) -> str:
+    """
+    Mock AI response generation.
+    """
+    text_lower = text.lower()
+    if 'hello' in text_lower or 'hi' in text_lower:
+        return "Hello! How can I assist you today with Nanovate services?"
+    elif 'help' in text_lower or 'مساعدة' in text:
+        return "I can help you with your account, billing, or technical issues. What do you need help with?"
+    else:
+        return f"I received your message: '{text}'. Our team will get back to you soon!"
+
+def send_instagram_message(recipient_id: str, text: str, page_access_token: str):
+    return send_graph_message(recipient_id, text, page_access_token)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ROUTES
@@ -323,7 +356,8 @@ def instagram_webhook_verify():
     return "Verification failed", 403
 
 @app.route('/instagram/webhook', methods=['POST'])
-def instagram_webhook_event():
+@app.route('/instagram/webhook/<agent_id>', methods=['POST'])
+def instagram_webhook_event(agent_id=None):
     # Verify signature
     signature = request.headers.get('X-Hub-Signature-256')
     if signature:
@@ -333,22 +367,56 @@ def instagram_webhook_event():
             hashlib.sha256
         ).hexdigest()
         if not hmac.compare_digest(signature, expected):
+            logger.warning("Invalid signature on Instagram webhook")
             return "Invalid signature", 403
 
-    data = request.json
+    data = request.get_json(force=True)
+    logger.info(f"Incoming Instagram Webhook (Agent: {agent_id}): {json.dumps(data)}")
+    
     if data.get('object') == 'instagram':
         for entry in data.get('entry', []):
-            for event in entry.get('messaging', []):
-                sender_id = event.get('sender', {}).get('id')
-                message = event.get('message', {})
+            for messaging in entry.get('messaging', []):
+                sender_id = messaging.get('sender', {}).get('id')
+                message = messaging.get('message', {})
                 text = message.get('text')
+                
                 if text:
+                    # Log the message for the UI
                     save_instagram_message({
                         'sender_id': sender_id,
                         'text': text,
-                        'timestamp': event.get('timestamp')
+                        'timestamp': messaging.get('timestamp')
                     })
+                    
+                    # AI Auto-Responder with Disclosure logic
+                    if agent_id:
+                        import asyncio
+                        agent_data = get_chat_agent_by_id(agent_id)
+                        
+                        if agent_data.get("instagram_token"):
+                            # Check if this is the FIRST message this session
+                            disclosure = ""
+                            if sender_id not in first_messages_sent:
+                                disclosure = f"{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}\n\n"
+                                first_messages_sent.add(sender_id)
+                            
+                            # Generate response (async helper called here)
+                            response_text = asyncio.run(generate_response(text, agent_data))
+                            
+                            # Send reply
+                            full_reply = f"{disclosure}{response_text}"
+                            send_instagram_message(sender_id, full_reply, agent_data["instagram_token"])
+                            
+                            # Save the reply for the UI
+                            save_instagram_message({
+                                'sender_id': 'AUTO_REPLY',
+                                'text': full_reply,
+                                'timestamp': int(time.time() * 1000)
+                            })
+                            
         return "EVENT_RECEIVED", 200
+    
+    logger.warning(f"Ignored webhook object: {data.get('object')}")
     return "IGNORED", 200
 
 @app.route('/instagram/dashboard')
@@ -376,8 +444,8 @@ def instagram_send():
     if not token:
         return jsonify({'success': False, 'error': 'No page token found'}), 401
     
-    # Add automation disclosure
-    disclosure = "\n\nThis is an automated response from Nanovate AI customer support. Type 'human' at any time to speak with a person."
+    # Add automation disclosure (Standardized from Task 2.4)
+    disclosure = f"\n\n{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}"
     full_message = f"{message_text}{disclosure}"
     
     result = send_graph_message(recipient_psid, full_message, token)
