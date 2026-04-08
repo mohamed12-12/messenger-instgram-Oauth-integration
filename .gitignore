@@ -25,3 +25,8 @@ env/
 
 # AWS EB artifacts
 .elasticbeanstalk/
+
+# Project Logs
+PROJECT_LOG.md
+README.md
+instgram.md
