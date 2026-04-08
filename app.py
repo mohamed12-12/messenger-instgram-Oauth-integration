@@ -45,6 +45,7 @@ MESSAGES_FILE = os.path.join(os.path.dirname(__file__), 'recent_messages.json')
 CONFIG_FILE   = os.path.join(os.path.dirname(__file__), 'config.json')
 TOKEN_FILE    = os.path.join(os.path.dirname(__file__), 'page_tokens.json')
 INSTAGRAM_MESSAGES_FILE = os.path.join(os.path.dirname(__file__), 'instagram_messages.json')
+WEBHOOK_DEBUG_FILE = os.path.join(os.path.dirname(__file__), 'webhook_debug.json')
 
 # In-memory storage for last 20 instagram messages if file doesn't exist
 instagram_messages = []
@@ -371,6 +372,19 @@ def instagram_webhook_event(agent_id=None):
             return "Invalid signature", 403
 
     data = request.get_json(force=True)
+    
+    # RAW DEBUG LOGGING - Log everything to help diagnose missing events
+    try:
+        debug_info = {
+            'timestamp': time.time(),
+            'agent_id': agent_id,
+            'headers': dict(request.headers),
+            'data': data
+        }
+        with open(WEBHOOK_DEBUG_FILE, 'w') as f:
+            json.dump(debug_info, f)
+    except: pass
+
     logger.info(f"Incoming Instagram Webhook (Agent: {agent_id}): {json.dumps(data)}")
     
     if data.get('object') == 'instagram':
@@ -478,6 +492,16 @@ def toggle_auto_response():
 @app.route('/api/config')
 def get_config():
     return jsonify(load_config())
+
+@app.route('/api/webhook-debug')
+def get_webhook_debug():
+    if not os.path.exists(WEBHOOK_DEBUG_FILE):
+        return jsonify({'error': 'No debug logs found yet. Webhook hasn\'t been hit.'})
+    try:
+        with open(WEBHOOK_DEBUG_FILE, 'r') as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 @app.route('/send-message', methods=['POST'])
 def send_message():
