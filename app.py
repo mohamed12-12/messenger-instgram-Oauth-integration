@@ -421,20 +421,18 @@ def instagram_webhook_event(agent_id=None):
         for messaging in entry.get('messaging', []):
             sender_id = messaging.get('sender', {}).get('id')
             last_webhook_info['sender_id'] = sender_id
-            logger.info(f"--- WEBHOOK DETAIL: object={obj_type}, entry_id={entry_id}, sender_id={sender_id}")
+            
+            # CRITICAL META FIX: Ignore echoes (messages sent BY the page/IG account)
+            # Both entry_id and instagram_account_id represent 'US'
+            my_id = os.getenv('INSTAGRAM_ACCOUNT_ID')
+            if sender_id == entry_id or (my_id and sender_id == my_id):
+                logger.info(f"⏭️ Skipping webhook echo from ourselves (Sender: {sender_id})")
+                continue
 
-    # Accept BOTH — this is the #1 reason developers miss incoming events
-    if obj_type not in ('instagram', 'page'):
-        logger.warning(f"⚠️ Ignored unknown webhook object type: '{obj_type}'")
-        return "IGNORED", 200
-
-    for entry in data.get('entry', []):
-        for messaging in entry.get('messaging', []):
-            sender_id = messaging.get('sender', {}).get('id')
             message = messaging.get('message', {})
             text = message.get('text')
 
-            if not sender_id or not text:
+            if not text:
                 continue
 
             # Save incoming message to UI feed
@@ -444,7 +442,7 @@ def instagram_webhook_event(agent_id=None):
                 'timestamp': messaging.get('timestamp', int(time.time() * 1000)),
                 'direction': 'inbound'
             })
-            logger.info(f"✅ Saved inbound message from IGSID {sender_id}: '{text}'")
+            logger.info(f"✅ Saved inbound message from {sender_id}: '{text}'")
 
             # AI Auto-Responder (only when agent_id route is used)
             if agent_id:
@@ -686,7 +684,13 @@ def webhook_event():
             for event in entry.get('messaging', []):
                 sender_id = event.get('sender', {}).get('id')
                 last_webhook_info['sender_id'] = sender_id
-                logger.info(f"--- MESSENGER WEBHOOK DETAIL: page_id={page_id}, sender_id={sender_id}")
+                
+                # CRITICAL META FIX: Ignore echoes
+                my_id = os.getenv('INSTAGRAM_ACCOUNT_ID')
+                if sender_id == page_id or (my_id and sender_id == my_id):
+                    logger.info(f"⏭️ /webhook: Skipping echo from {sender_id}")
+                    continue
+
                 message = event.get('message', {})
                 text = message.get('text')
                 if text:
@@ -700,8 +704,7 @@ def webhook_event():
                         'timestamp': ts
                     })
 
-                    # ★ ALSO save to Instagram feed — Meta uses ONE webhook URL for ALL platforms
-                    # Instagram DMs arrive here as object=page, not object=instagram
+                    # ★ ALSO save to Instagram feed
                     save_instagram_message({
                         'sender_id': sender_id,
                         'text': text,
