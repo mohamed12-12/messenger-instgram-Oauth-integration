@@ -361,7 +361,9 @@ def instagram_webhook_verify(agent_id=None):
 @app.route('/instagram/webhook', methods=['POST'])
 @app.route('/instagram/webhook/<agent_id>', methods=['POST'])
 def instagram_webhook_event(agent_id=None):
-    # Verify signature
+    import asyncio
+
+    # Verify HMAC signature
     signature = request.headers.get('X-Hub-Signature-256')
     if signature:
         expected = 'sha256=' + hmac.new(
@@ -374,66 +376,63 @@ def instagram_webhook_event(agent_id=None):
             return "Invalid signature", 403
 
     data = request.get_json(force=True)
-    
-    # RAW DEBUG LOGGING - Log everything to help diagnose missing events
-    try:
-        debug_info = {
-            'timestamp': time.time(),
-            'agent_id': agent_id,
-            'headers': dict(request.headers),
-            'data': data
-        }
-        with open(WEBHOOK_DEBUG_FILE, 'w') as f:
-            json.dump(debug_info, f)
-    except: pass
 
-    logger.info(f"Incoming Instagram Webhook (Agent: {agent_id}): {json.dumps(data)}")
-    
-    if data.get('object') == 'instagram':
-        for entry in data.get('entry', []):
-            for messaging in entry.get('messaging', []):
-                sender_id = messaging.get('sender', {}).get('id')
-                message = messaging.get('message', {})
-                text = message.get('text')
-                
-                if text:
-                    # Log the message for the UI
+    # RAW DEBUG LOGGING — saves every incoming payload for diagnosis
+    try:
+        with open(WEBHOOK_DEBUG_FILE, 'w') as f:
+            json.dump({'timestamp': time.time(), 'agent_id': agent_id, 'headers': dict(request.headers), 'data': data}, f)
+    except Exception as e:
+        logger.error(f"Debug write failed: {e}")
+
+    logger.info(f"📥 Instagram Webhook hit — object='{data.get('object')}' agent_id='{agent_id}'")
+
+    obj_type = data.get('object')
+
+    # KEY FIX: Meta sends Instagram DMs as 'page' (via Messenger product) OR 'instagram'
+    # Accept BOTH — this is the #1 reason developers miss incoming events
+    if obj_type not in ('instagram', 'page'):
+        logger.warning(f"⚠️ Ignored unknown webhook object type: '{obj_type}'")
+        return "IGNORED", 200
+
+    for entry in data.get('entry', []):
+        for messaging in entry.get('messaging', []):
+            sender_id = messaging.get('sender', {}).get('id')
+            message = messaging.get('message', {})
+            text = message.get('text')
+
+            if not sender_id or not text:
+                continue
+
+            # Save incoming message to UI feed
+            save_instagram_message({
+                'sender_id': sender_id,
+                'text': text,
+                'timestamp': messaging.get('timestamp', int(time.time() * 1000)),
+                'direction': 'inbound'
+            })
+            logger.info(f"✅ Saved inbound message from IGSID {sender_id}: '{text}'")
+
+            # AI Auto-Responder (only when agent_id route is used)
+            if agent_id:
+                agent_data = get_chat_agent_by_id(agent_id)
+                token = agent_data.get("instagram_token")
+                if token:
+                    disclosure = ""
+                    if sender_id not in first_messages_sent:
+                        disclosure = f"{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}\n\n"
+                        first_messages_sent.add(sender_id)
+                    response_text = asyncio.run(generate_response(text, agent_data))
+                    full_reply = f"{disclosure}{response_text}"
+                    send_instagram_message(sender_id, full_reply, token)
                     save_instagram_message({
-                        'sender_id': sender_id,
-                        'text': text,
-                        'timestamp': messaging.get('timestamp')
+                        'sender_id': 'AUTO_REPLY',
+                        'text': full_reply,
+                        'timestamp': int(time.time() * 1000),
+                        'direction': 'outbound'
                     })
-                    
-                    # AI Auto-Responder with Disclosure logic
-                    if agent_id:
-                        import asyncio
-                        agent_data = get_chat_agent_by_id(agent_id)
-                        
-                        if agent_data.get("instagram_token"):
-                            # Check if this is the FIRST message this session
-                            disclosure = ""
-                            if sender_id not in first_messages_sent:
-                                disclosure = f"{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}\n\n"
-                                first_messages_sent.add(sender_id)
-                            
-                            # Generate response (async helper called here)
-                            response_text = asyncio.run(generate_response(text, agent_data))
-                            
-                            # Send reply
-                            full_reply = f"{disclosure}{response_text}"
-                            send_instagram_message(sender_id, full_reply, agent_data["instagram_token"])
-                            
-                            # Save the reply for the UI
-                            save_instagram_message({
-                                'sender_id': 'AUTO_REPLY',
-                                'text': full_reply,
-                                'timestamp': int(time.time() * 1000)
-                            })
-                            
-        return "EVENT_RECEIVED", 200
-    
-    logger.warning(f"Ignored webhook object: {data.get('object')}")
-    return "IGNORED", 200
+                    logger.info(f"📤 Sent auto-reply to {sender_id}")
+
+    return "EVENT_RECEIVED", 200
 
 @app.route('/instagram/dashboard')
 def instagram_dashboard():
