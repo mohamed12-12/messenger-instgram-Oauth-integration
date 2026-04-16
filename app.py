@@ -201,6 +201,19 @@ def send_graph_message(recipient_id: str, text: str, page_access_token: str) -> 
     except Exception as e:
         return {'error': str(e)}
 
+def post_messenger_control(path: str, payload: dict, page_access_token: str) -> dict:
+    resp = requests.post(
+        f'{GRAPH_BASE}/{path}',
+        params={'access_token': page_access_token},
+        json=payload,
+        timeout=10
+    )
+    data = resp.json()
+    if not resp.ok:
+        message = data.get('error', {}).get('message', 'Unknown Messenger control error')
+        raise requests.HTTPError(message, response=resp)
+    return data
+
 def graph_get(path: str, params: dict) -> dict:
     resp = requests.get(f'{GRAPH_BASE}/{path}', params=params, timeout=10)
     resp.raise_for_status()
@@ -255,6 +268,10 @@ def graph_get_all_items(path: str, params: dict) -> list:
 
 def get_user_pages(user_access_token: str) -> list:
     return graph_get_all_items('me/accounts', {'access_token': user_access_token})
+
+def get_connected_page_token():
+    page_id = session.get('connected_page_id')
+    return session.get('page_access_token') or (get_page_token(page_id) if page_id else None)
 
 # ─── Agent & AI Helpers ──────────────────────────────────────────────────────
 def get_chat_agent_by_id(agent_id: str):
@@ -705,7 +722,7 @@ def messenger_debug():
     page_id = session.get('connected_page_id')
     page_name = session.get('connected_page_name')
     user_token = session.get('user_access_token')
-    token = get_page_token(page_id) if page_id else None
+    token = get_connected_page_token()
 
     debug_info = {
         'connected_page_id': page_id,
@@ -719,6 +736,9 @@ def messenger_debug():
         'last_hit_matches_connected_page': bool(page_id and last_webhook_info['entry_id'] == page_id),
         'is_subscribed': None,
         'subscribed_fields': [],
+        'primary_receiver_app_id': None,
+        'current_app_is_primary': None,
+        'profile_error': None,
         'subscription_error': None
     }
 
@@ -738,12 +758,92 @@ def messenger_debug():
 
             debug_info['is_subscribed'] = len(subscribed_fields) > 0
             debug_info['subscribed_fields'] = subscribed_fields
+
+            try:
+                profile = graph_get('me/messenger_profile', {
+                    'fields': 'primary_receiver',
+                    'access_token': page_token
+                })
+                profile_data = profile.get('data', [])
+                primary_receiver = profile_data[0].get('primary_receiver') if profile_data else None
+                primary_app_id = str((primary_receiver or {}).get('app_id')) if primary_receiver else None
+                debug_info['primary_receiver_app_id'] = primary_app_id
+                debug_info['current_app_is_primary'] = bool(primary_app_id and str(META_APP_ID) == primary_app_id)
+            except Exception as e:
+                debug_info['profile_error'] = str(e)
         else:
             debug_info['subscription_error'] = 'No page access token found for the connected page.'
     except Exception as e:
         debug_info['subscription_error'] = str(e)
 
     return jsonify(debug_info)
+
+@app.route('/api/thread-owner')
+def get_thread_owner():
+    recipient_id = request.args.get('recipient_id')
+    token = get_connected_page_token()
+
+    if not recipient_id:
+        return jsonify({'success': False, 'error': 'recipient_id is required'}), 400
+    if not token:
+        return jsonify({'success': False, 'error': 'No connected page token found. Please reconnect the page.'}), 401
+
+    try:
+        owner = graph_get('me/thread_owner', {
+            'recipient': recipient_id,
+            'access_token': token
+        })
+        owner_data = owner.get('data', [])
+        thread_owner_app_id = str(owner_data[0].get('thread_owner')) if owner_data else None
+        return jsonify({
+            'success': True,
+            'recipient_id': recipient_id,
+            'thread_owner_app_id': thread_owner_app_id,
+            'current_app_id': str(META_APP_ID),
+            'current_app_owns_thread': bool(thread_owner_app_id and str(META_APP_ID) == thread_owner_app_id),
+            'raw': owner
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.route('/api/thread-control/<action>', methods=['POST'])
+def thread_control(action):
+    data = request.get_json(silent=True) or {}
+    recipient_id = data.get('recipient_id')
+    metadata = data.get('metadata') or f'{action} by messenger-integration dashboard'
+    target_app_id = data.get('target_app_id')
+    token = get_connected_page_token()
+
+    if action not in {'request', 'take', 'pass'}:
+        return jsonify({'success': False, 'error': 'Unsupported thread control action'}), 400
+    if not recipient_id:
+        return jsonify({'success': False, 'error': 'recipient_id is required'}), 400
+    if not token:
+        return jsonify({'success': False, 'error': 'No connected page token found. Please reconnect the page.'}), 401
+
+    try:
+        if action == 'request':
+            result = post_messenger_control('me/request_thread_control', {
+                'recipient': {'id': recipient_id},
+                'metadata': metadata
+            }, token)
+        elif action == 'take':
+            result = post_messenger_control('me/take_thread_control', {
+                'recipient': {'id': recipient_id},
+                'metadata': metadata
+            }, token)
+        else:
+            if not target_app_id:
+                return jsonify({'success': False, 'error': 'target_app_id is required for pass action'}), 400
+            result = post_messenger_control('me/pass_thread_control', {
+                'recipient': {'id': recipient_id},
+                'target_app_id': int(target_app_id),
+                'metadata': metadata
+            }, token)
+
+        return jsonify({'success': True, 'action': action, 'result': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route('/api/instagram-debug')
 def instagram_debug():
@@ -832,7 +932,7 @@ def check_subscription():
 def send_message():
     recipient_id = request.form.get('recipient_id')
     message_text = request.form.get('message')
-    token = session.get('page_access_token')
+    token = get_connected_page_token()
     page_id = session.get('connected_page_id')
 
     if not token:
