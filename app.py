@@ -102,6 +102,11 @@ def load_messages():
         with open(MESSAGES_FILE, 'r') as f: return json.load(f)
     except: return []
 
+def get_messages_for_page(page_id):
+    if not page_id:
+        return []
+    return [msg for msg in load_messages() if msg.get('page_id') == page_id]
+
 def save_message(msg):
     messages = load_messages()
     messages.insert(0, msg)
@@ -334,8 +339,9 @@ def connect_page(page_id):
 @app.route('/dashboard')
 def dashboard():
     page_name = session.get('connected_page_name')
+    page_id = session.get('connected_page_id')
     if not page_name: return redirect('/')
-    return render_template('dashboard.html', page_name=page_name)
+    return render_template('dashboard.html', page_name=page_name, page_id=page_id)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  INSTAGRAM ROUTES
@@ -609,7 +615,8 @@ def instagram_send():
 
 @app.route('/api/recent-messages')
 def get_recent_messages():
-    return jsonify(load_messages())
+    page_id = session.get('connected_page_id')
+    return jsonify(get_messages_for_page(page_id))
 
 @app.route('/api/recent-instagram-messages')
 def get_recent_instagram_messages():
@@ -737,6 +744,17 @@ def webhook_event():
         'object': data.get('object'),
         'payload': data
     })
+
+    try:
+        with open(WEBHOOK_DEBUG_FILE, 'w') as f:
+            json.dump({
+                'timestamp': time.time(),
+                'endpoint': '/webhook',
+                'headers': dict(request.headers),
+                'data': data
+            }, f)
+    except Exception as e:
+        logger.error(f"Messenger debug write failed: {e}")
     
     last_webhook_info['timestamp'] = time.time()
     last_webhook_info['object_type'] = data.get('object')

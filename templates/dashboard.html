@@ -309,7 +309,7 @@
 <body>
     <div class="navbar">
         <div class="logo">nanovate.io</div>
-        <div class="page-badge">Connected: {{ page_name }}</div>
+        <div class="page-badge">Connected: {{ page_name }}{% if page_id %} ({{ page_id }}){% endif %}</div>
     </div>
 
     <main>
@@ -375,6 +375,7 @@
         const autoToggle = document.getElementById('autoToggle');
         const autoStatusText = document.getElementById('autoStatusText');
         const automationStatus = document.getElementById('automationStatus');
+        const connectedPageId = {{ page_id|tojson }};
 
         function copyPSID(id) { document.getElementById('recipient_id').value = id; }
 
@@ -412,7 +413,14 @@
             try {
                 const response = await fetch('/api/recent-messages');
                 const messages = await response.json();
-                if (messages.length === 0) return;
+                if (messages.length === 0) {
+                    feed.innerHTML = `
+                        <div style="text-align: center; color: #9ca3af; padding: 20px; border: 1px dashed #e5e7eb; border-radius: 10px; font-size: 13px;">
+                            No messages yet for ${connectedPageId ? `page ${connectedPageId}` : 'this page'}.
+                        </div>
+                    `;
+                    return;
+                }
                 feed.innerHTML = messages.map(m => `
                     <div class="msg-item ${m.is_reply ? 'is-reply' : ''}">
                         <div class="psid" ${m.is_reply ? '' : `onclick="copyPSID('${m.sender_id}')" title="Click to copy PSID"`}>
