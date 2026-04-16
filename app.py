@@ -715,8 +715,20 @@ def send_message():
     recipient_id = request.form.get('recipient_id')
     message_text = request.form.get('message')
     token = session.get('page_access_token')
+    page_id = session.get('connected_page_id')
+
+    if not token:
+        return jsonify({'success': False, 'error': 'No connected page token found. Please reconnect the page.'}), 401
+
     result = send_graph_message(recipient_id, message_text, token)
     if 'message_id' in result:
+        save_message({
+            'page_id': page_id,
+            'sender_id': 'MANUAL_REPLY',
+            'text': f"{message_text} (ID: {result['message_id']})",
+            'is_reply': True,
+            'timestamp': int(time.time() * 1000)
+        })
         return jsonify({'success': True, 'result': result})
     return jsonify({'success': False, 'error': result}), 400
 
