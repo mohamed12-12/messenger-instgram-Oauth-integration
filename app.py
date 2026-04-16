@@ -182,6 +182,38 @@ def graph_get(path: str, params: dict) -> dict:
     resp.raise_for_status()
     return resp.json()
 
+def format_oauth_exchange_error(exc: Exception, platform_name: str) -> str:
+    default_msg = f'{platform_name} login failed. Please click Connect again and do not refresh the callback page.'
+    response = getattr(exc, 'response', None)
+    if response is None:
+        return default_msg
+
+    try:
+        payload = response.json()
+    except ValueError:
+        logger.error("%s OAuth exchange failed with non-JSON response: %s", platform_name, response.text)
+        return default_msg
+
+    error = payload.get('error', {})
+    message = error.get('message', '')
+    code = error.get('code')
+    subcode = error.get('error_subcode')
+
+    logger.error(
+        "%s OAuth exchange failed. status=%s code=%s subcode=%s message=%s",
+        platform_name,
+        response.status_code,
+        code,
+        subcode,
+        message
+    )
+
+    lowered = message.lower()
+    if 'authorization code' in lowered or 'verification code' in lowered or 'code has been used' in lowered:
+        return f'{platform_name} login code expired or was already used. Please click Connect again and complete the login flow once.'
+
+    return default_msg
+
 def graph_get_all_items(path: str, params: dict) -> list:
     items = []
     next_url = f'{GRAPH_BASE}/{path}'
@@ -257,10 +289,14 @@ def auth_callback():
     state = request.args.get('state')
     error = request.args.get('error')
     error_description = request.args.get('error_description')
-    if state != session.get('oauth_state'):
+    expected_state = session.pop('oauth_state', None)
+
+    if not state or not expected_state or state != expected_state:
         return render_template('index.html', error='CSRF Error. Please try again.'), 400
     if error:
         return render_template('index.html', error=error_description or error), 400
+    if not code:
+        return render_template('index.html', error='Missing Facebook login code. Please click Connect again.'), 400
     try:
         token_data = graph_get('oauth/access_token', {
             'client_id':     META_APP_ID,
@@ -285,9 +321,12 @@ def auth_callback():
             ), 400
 
         return render_template('select_page.html', pages=page_options)
+    except requests.HTTPError as e:
+        logger.exception("Messenger auth callback token exchange failed.")
+        return render_template('index.html', error=format_oauth_exchange_error(e, 'Facebook')), 400
     except Exception as e:
         logger.exception("Messenger auth callback failed.")
-        return render_template('index.html', error=str(e)), 500
+        return render_template('index.html', error='Facebook login failed unexpectedly. Please try connecting again.'), 500
 
 @app.route('/connect-page/<page_id>')
 def connect_page(page_id):
@@ -367,8 +406,16 @@ def instagram_connect():
 def instagram_auth_callback():
     code = request.args.get('code')
     state = request.args.get('state')
-    if state != session.get('oauth_state'):
+    error = request.args.get('error')
+    error_description = request.args.get('error_description')
+    expected_state = session.pop('oauth_state', None)
+
+    if not state or not expected_state or state != expected_state:
         return render_template('instagram_index.html', error='CSRF Error. Please try again.'), 400
+    if error:
+        return render_template('instagram_index.html', error=error_description or error), 400
+    if not code:
+        return render_template('instagram_index.html', error='Missing Facebook login code. Please click Connect again.'), 400
     try:
         # 1. Exchange code for user access token
         token_data = graph_get('oauth/access_token', {
@@ -440,10 +487,12 @@ def instagram_auth_callback():
             error_msg = f'Found {page_list_count} pages, but none have an Instagram Business Account linked. Please check your Page Settings on Facebook.'
             
         return render_template('instagram_index.html', error=error_msg), 400
-        
+    except requests.HTTPError as e:
+        logger.exception("Instagram auth callback token exchange failed.")
+        return render_template('instagram_index.html', error=format_oauth_exchange_error(e, 'Instagram')), 400
     except Exception as e:
-        logger.error(f"IG OAuth error: {str(e)}")
-        return render_template('instagram_index.html', error=str(e)), 500
+        logger.exception("IG OAuth error")
+        return render_template('instagram_index.html', error='Instagram login failed unexpectedly. Please try connecting again.'), 500
 
 @app.route('/instagram/webhook', methods=['GET'])
 @app.route('/instagram/webhook/<agent_id>', methods=['GET'])
@@ -626,6 +675,51 @@ def get_recent_instagram_messages():
 @app.route('/api/webhook-last-hit')
 def get_webhook_last_hit():
     return jsonify(list(webhook_hits_log))
+
+@app.route('/api/messenger-debug')
+def messenger_debug():
+    page_id = session.get('connected_page_id')
+    page_name = session.get('connected_page_name')
+    user_token = session.get('user_access_token')
+    token = get_page_token(page_id) if page_id else None
+
+    debug_info = {
+        'connected_page_id': page_id,
+        'connected_page_name': page_name,
+        'has_saved_page_token': bool(token),
+        'message_count': len(get_messages_for_page(page_id)),
+        'last_webhook_hit_timestamp': last_webhook_info['timestamp'],
+        'last_object_type': last_webhook_info['object_type'],
+        'last_entry_id': last_webhook_info['entry_id'],
+        'last_sender_id': last_webhook_info['sender_id'],
+        'last_hit_matches_connected_page': bool(page_id and last_webhook_info['entry_id'] == page_id),
+        'is_subscribed': None,
+        'subscribed_fields': [],
+        'subscription_error': None
+    }
+
+    if not page_id or not user_token:
+        return jsonify(debug_info)
+
+    try:
+        pages = get_user_pages(user_token)
+        page_data = next((page for page in pages if page.get('id') == page_id), None)
+        page_token = (page_data or {}).get('access_token') or token
+
+        if page_token:
+            subs = graph_get(f'{page_id}/subscribed_apps', {'access_token': page_token})
+            subscribed_fields = []
+            for sub in subs.get('data', []):
+                subscribed_fields = sub.get('subscribed_fields', [])
+
+            debug_info['is_subscribed'] = len(subscribed_fields) > 0
+            debug_info['subscribed_fields'] = subscribed_fields
+        else:
+            debug_info['subscription_error'] = 'No page access token found for the connected page.'
+    except Exception as e:
+        debug_info['subscription_error'] = str(e)
+
+    return jsonify(debug_info)
 
 @app.route('/api/instagram-debug')
 def instagram_debug():

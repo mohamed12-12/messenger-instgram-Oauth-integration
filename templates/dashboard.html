@@ -154,6 +154,25 @@
             margin-bottom: 16px;
         }
 
+        .debug-card {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 16px;
+            padding: 16px;
+        }
+
+        .debug-card .line {
+            color: #1e3a8a;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+
+        .debug-card .line:last-child {
+            margin-bottom: 0;
+        }
+
         .msg-list {
             display: flex;
             flex-direction: column;
@@ -357,6 +376,12 @@
 
         <div class="sidebar">
             <div class="activity-card">
+                <h3>Connection Debug</h3>
+                <div id="debug-box" class="debug-card">
+                    <div class="line">Checking current page status...</div>
+                </div>
+            </div>
+            <div class="activity-card">
                 <h3>Incoming Events (Live)</h3>
                 <div id="msg-feed" class="msg-list">
                     <div
@@ -376,6 +401,7 @@
         const autoStatusText = document.getElementById('autoStatusText');
         const automationStatus = document.getElementById('automationStatus');
         const connectedPageId = {{ page_id|tojson }};
+        const debugBox = document.getElementById('debug-box');
 
         function copyPSID(id) { document.getElementById('recipient_id').value = id; }
 
@@ -432,8 +458,30 @@
             } catch (err) { console.error(err); }
         }
 
+        async function updateDebug() {
+            try {
+                const response = await fetch('/api/messenger-debug');
+                const data = await response.json();
+                debugBox.innerHTML = `
+                    <div class="line"><strong>Page:</strong> ${data.connected_page_name || 'Unknown'}${data.connected_page_id ? ` (${data.connected_page_id})` : ''}</div>
+                    <div class="line"><strong>Saved token:</strong> ${data.has_saved_page_token ? 'Yes' : 'No'}</div>
+                    <div class="line"><strong>Subscribed:</strong> ${data.is_subscribed === null ? 'Unknown' : (data.is_subscribed ? 'Yes' : 'No')}</div>
+                    <div class="line"><strong>Fields:</strong> ${data.subscribed_fields?.length ? data.subscribed_fields.join(', ') : 'None reported'}</div>
+                    <div class="line"><strong>Messages saved:</strong> ${data.message_count}</div>
+                    <div class="line"><strong>Last webhook page:</strong> ${data.last_entry_id || 'None yet'}</div>
+                    <div class="line"><strong>Matches this page:</strong> ${data.last_hit_matches_connected_page ? 'Yes' : 'No'}</div>
+                    <div class="line"><strong>Last object:</strong> ${data.last_object_type || 'None yet'}</div>
+                    <div class="line"><strong>Subscription error:</strong> ${data.subscription_error || 'None'}</div>
+                `;
+            } catch (err) {
+                debugBox.innerHTML = `<div class="line"><strong>Debug error:</strong> ${err.message}</div>`;
+            }
+        }
+
         setInterval(updateFeed, 3000);
+        setInterval(updateDebug, 5000);
         updateFeed();
+        updateDebug();
         fetchConfig();
 
         form.onsubmit = async (e) => {
