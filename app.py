@@ -353,6 +353,26 @@ def get_connected_page_token(page_id=None):
         return session.get('page_access_token')
     return get_page_token(page_id) if page_id else None
 
+def get_primary_receiver_info(page_id):
+    page_token = get_page_token(page_id)
+    if not page_token:
+        return {'primary_receiver': 'Unknown', 'error': f'No stored page token found for page {page_id}.'}
+
+    try:
+        profile = graph_get('me/messenger_profile', {
+            'fields': 'primary_receiver',
+            'access_token': page_token
+        })
+        profile_data = profile.get('data', [])
+        primary_receiver = profile_data[0].get('primary_receiver') if profile_data else None
+        primary_app_id = str((primary_receiver or {}).get('app_id')) if primary_receiver else None
+        return {
+            'primary_receiver': primary_app_id or 'Unknown',
+            'error': None
+        }
+    except Exception as e:
+        return {'primary_receiver': 'Unknown', 'error': str(e)}
+
 def get_instagram_page_token(ig_account_id=None):
     ig_account_id = ig_account_id or session.get('instagram_account_id')
     if ig_account_id and session.get('instagram_account_id') == ig_account_id and session.get('instagram_page_token'):
@@ -867,18 +887,11 @@ def messenger_debug():
             debug_info['is_subscribed'] = len(subscribed_fields) > 0
             debug_info['subscribed_fields'] = subscribed_fields
 
-            try:
-                profile = graph_get('me/messenger_profile', {
-                    'fields': 'primary_receiver',
-                    'access_token': page_token
-                })
-                profile_data = profile.get('data', [])
-                primary_receiver = profile_data[0].get('primary_receiver') if profile_data else None
-                primary_app_id = str((primary_receiver or {}).get('app_id')) if primary_receiver else None
-                debug_info['primary_receiver_app_id'] = primary_app_id
-                debug_info['current_app_is_primary'] = bool(primary_app_id and str(META_APP_ID) == primary_app_id)
-            except Exception as e:
-                debug_info['profile_error'] = str(e)
+            profile_info = get_primary_receiver_info(page_id)
+            debug_info['primary_receiver_app_id'] = profile_info['primary_receiver']
+            debug_info['profile_error'] = profile_info['error']
+            if profile_info['primary_receiver'] != 'Unknown':
+                debug_info['current_app_is_primary'] = bool(str(META_APP_ID) == profile_info['primary_receiver'])
         else:
             debug_info['subscription_error'] = 'No page access token found for the connected page.'
     except Exception as e:
