@@ -44,7 +44,7 @@ SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_show
 
 # ─── Persistent Storage Files ────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
-LEGACY_MESSAGES_FILE = os.path.join(BASE_DIR, 'recent_messages.json')
+MESSAGES_FILE = os.path.join(BASE_DIR, 'recent_messages.json')
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 TOKEN_FILE = os.path.join(BASE_DIR, 'page_tokens.json')
 LEGACY_INSTAGRAM_MESSAGES_FILE = os.path.join(BASE_DIR, 'instagram_messages.json')
@@ -108,8 +108,10 @@ def get_saved_instagram_username(ig_account_id):
     cfg = load_config()
     return ((cfg.get('instagram_accounts') or {}).get(str(ig_account_id)) or {}).get('username')
 
-def build_messages_file(page_id):
-    return os.path.join(BASE_DIR, f'messages_{page_id}.json')
+def get_messages_file(page_id=None):
+    if page_id:
+        return os.path.join(os.path.dirname(__file__), f'messages_{page_id}.json')
+    return MESSAGES_FILE
 
 def build_instagram_messages_file(ig_account_id):
     return os.path.join(BASE_DIR, f'instagram_messages_{ig_account_id}.json')
@@ -153,9 +155,11 @@ def get_page_token(page_id):
     except: return None
 
 def load_messages(page_id=None):
-    if page_id:
-        return load_json_list(build_messages_file(page_id))
-    return load_json_list(LEGACY_MESSAGES_FILE)
+    f = get_messages_file(page_id)
+    if not os.path.exists(f): return []
+    try:
+        with open(f, 'r') as fp: return json.load(fp)
+    except: return []
 
 def get_messages_for_page(page_id):
     if not page_id:
@@ -169,23 +173,24 @@ def get_agent_messages():
     messages.sort(key=lambda msg: msg.get('timestamp', 0), reverse=True)
     return messages[:25]
 
-def save_message(msg, page_id=None):
-    page_id = page_id or msg.get('page_id')
-    if not page_id:
-        logger.warning("Skipping message save because page_id is missing: %s", msg)
-        return
+def save_message(msg):
+    page_id = msg.get('page_id')
+    if page_id:
+        f = get_messages_file(page_id)
+        messages = load_messages(page_id)
+        messages.insert(0, msg)
+        messages = messages[:15]
+        try:
+            with open(f, 'w') as fp: json.dump(messages, fp)
+        except Exception as e:
+            logger.error(f"Failed to write page messages: {e}")
+    messages = load_messages()
+    messages.insert(0, msg)
+    messages = messages[:15]
     try:
-        page_messages = load_messages(page_id)
-        page_messages.insert(0, msg)
-        page_messages = page_messages[:15]
-        save_json_list(build_messages_file(page_id), page_messages)
-
-        recent_messages = load_messages()
-        recent_messages.insert(0, msg)
-        recent_messages = recent_messages[:15]
-        save_json_list(LEGACY_MESSAGES_FILE, recent_messages)
+        with open(MESSAGES_FILE, 'w') as fp: json.dump(messages, fp)
     except Exception as e:
-        logger.error("Failed to write to messages file: %s", e)
+        logger.error(f"Failed to write global messages: {e}")
 
 def record_messenger_text_event(page_id, sender_id, text, ts, source, asset_type='page'):
     save_message({
@@ -196,7 +201,7 @@ def record_messenger_text_event(page_id, sender_id, text, ts, source, asset_type
         'text': text,
         'timestamp': ts,
         'source': source
-    }, page_id=page_id)
+    })
 
     logger.info("Saved %s message from %s for page %s", source, sender_id, page_id)
 
@@ -511,7 +516,7 @@ def connect_page(page_id):
             try:
                 save_page_token(page_id, page_token)
             except: pass
-            return redirect(url_for('dashboard_page', page_id=page_id))
+            return redirect(url_for('dashboard', page_id=page_id))
         return render_template(
             'select_page.html',
             pages=page_options,
@@ -522,18 +527,24 @@ def connect_page(page_id):
         return render_template('select_page.html', pages=[], error=str(e)), 500
 
 @app.route('/dashboard')
-def dashboard():
-    page_id, _ = get_connected_page_context()
-    if not page_id:
-        return redirect('/')
-    return redirect(url_for('dashboard_page', page_id=page_id))
-
 @app.route('/dashboard/<page_id>')
-def dashboard_page(page_id):
-    page_name = get_saved_page_name(page_id) or page_id
-    session['connected_page_id'] = page_id
-    session['connected_page_name'] = page_name
-    return render_template('dashboard.html', page_name=page_name, page_id=page_id)
+def dashboard(page_id=None):
+    # If page_id in URL, use it directly (no session needed)
+    if page_id:
+        page_token = get_page_token(page_id)
+        page_name = session.get('connected_page_name', f'Page {page_id}')
+        return render_template('dashboard.html', 
+                               page_name=page_name,
+                               page_id=page_id,
+                               has_token=bool(page_token))
+    # Fallback to session
+    page_name = session.get('connected_page_name')
+    page_id = session.get('connected_page_id')
+    if not page_name: return redirect('/')
+    return render_template('dashboard.html', 
+                           page_name=page_name,
+                           page_id=page_id,
+                           has_token=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  INSTAGRAM ROUTES
@@ -734,7 +745,7 @@ def instagram_webhook_event(agent_id=None):
                 'text': text,
                 'timestamp': messaging.get('timestamp', int(time.time() * 1000)),
                 'source': 'instagram_webhook'
-            }, page_id=entry_id)
+            })
             save_instagram_message({
                 'page_id': entry_id,
                 'asset_id': entry_id,
@@ -768,7 +779,7 @@ def instagram_webhook_event(agent_id=None):
                         'timestamp': int(time.time() * 1000),
                         'is_reply': True,
                         'source': 'instagram_auto_reply'
-                    }, page_id=entry_id)
+                    })
                     save_instagram_message({
                         'page_id': entry_id,
                         'asset_id': entry_id,
@@ -843,8 +854,8 @@ def instagram_send():
 
 @app.route('/api/recent-messages')
 def get_recent_messages():
-    page_id = request.args.get('page_id') or session.get('connected_page_id')
-    return jsonify(get_messages_for_page(page_id))
+    page_id = request.args.get('page_id')
+    return jsonify(load_messages(page_id))
 
 @app.route('/api/agent-messages')
 def get_agent_messages_api():
@@ -858,6 +869,75 @@ def get_recent_instagram_messages():
 @app.route('/api/webhook-last-hit')
 def get_webhook_last_hit():
     return jsonify(list(webhook_hits_log))
+
+@app.route('/api/debug/<page_id>')
+def debug_page(page_id):
+    page_token = get_page_token(page_id)
+    page_name = session.get('connected_page_name', f'Page {page_id}')
+    if not page_token:
+        return jsonify({
+            'connected_page_id': page_id,
+            'connected_page_name': page_name,
+            'primary_receiver': 'Unknown',
+            'primary_receiver_app_id': 'Unknown',
+            'is_primary': 'Unknown',
+            'current_app_is_primary': 'Unknown',
+            'subscribed_fields': [],
+            'page_token_exists': False,
+            'has_saved_page_token': False,
+            'message_count': len(load_messages()),
+            'page_message_count': len(load_messages(page_id)),
+            'last_entry_id': last_webhook_info['entry_id'],
+            'last_object_type': last_webhook_info['object_type'],
+            'last_hit_matches_connected_page': bool(last_webhook_info['entry_id'] == page_id),
+            'error': 'No page token saved for this page_id'
+        })
+    try:
+        profile = graph_get('me/messenger_profile', {
+            'fields': 'primary_receiver',
+            'access_token': page_token
+        })
+        apps_data = graph_get(f'{page_id}/subscribed_apps', {
+            'access_token': page_token
+        })
+        subscribed_fields = []
+        for app in apps_data.get('data', []):
+            subscribed_fields = app.get('subscribed_fields', [])
+        primary_receiver = profile.get('data', [{}])[0].get('primary_receiver', 'Unknown')
+        return jsonify({
+            'connected_page_id': page_id,
+            'connected_page_name': page_name,
+            'primary_receiver': primary_receiver,
+            'primary_receiver_app_id': (primary_receiver or {}).get('app_id') if isinstance(primary_receiver, dict) else primary_receiver,
+            'is_primary': 'Unknown',
+            'current_app_is_primary': 'Unknown',
+            'subscribed_fields': subscribed_fields,
+            'page_token_exists': True,
+            'has_saved_page_token': True,
+            'message_count': len(load_messages()),
+            'page_message_count': len(load_messages(page_id)),
+            'last_entry_id': last_webhook_info['entry_id'],
+            'last_object_type': last_webhook_info['object_type'],
+            'last_hit_matches_connected_page': bool(last_webhook_info['entry_id'] == page_id)
+        })
+    except Exception as e:
+        return jsonify({
+            'connected_page_id': page_id,
+            'connected_page_name': page_name,
+            'primary_receiver': 'Unknown',
+            'primary_receiver_app_id': 'Unknown',
+            'is_primary': 'Unknown',
+            'current_app_is_primary': 'Unknown',
+            'subscribed_fields': [],
+            'page_token_exists': True,
+            'has_saved_page_token': True,
+            'message_count': len(load_messages()),
+            'page_message_count': len(load_messages(page_id)),
+            'last_entry_id': last_webhook_info['entry_id'],
+            'last_object_type': last_webhook_info['object_type'],
+            'last_hit_matches_connected_page': bool(last_webhook_info['entry_id'] == page_id),
+            'error': str(e)
+        })
 
 @app.route('/api/messenger-debug')
 def messenger_debug():
@@ -1091,7 +1171,7 @@ def send_message():
             'is_reply': True,
             'timestamp': int(time.time() * 1000),
             'source': 'messenger_manual_reply'
-        }, page_id=page_id)
+        })
         return jsonify({'success': True, 'result': result})
     return jsonify({'success': False, 'error': result}), 400
 
@@ -1195,7 +1275,7 @@ def webhook_event():
                                     'is_reply': True,
                                     'timestamp': int(time.time() * 1000),
                                     'source': 'messenger_auto_reply'
-                                }, page_id=page_id)
+                                })
 
             if handled_entry:
                 continue
@@ -1219,7 +1299,7 @@ def webhook_event():
                         'text': text,
                         'timestamp': messaging.get('timestamp', int(time.time() * 1000)),
                         'source': 'messenger_webhook_ig'
-                    }, page_id=entry_id)
+                    })
                     save_instagram_message({
                         'page_id': entry_id,
                         'asset_id': entry_id,
