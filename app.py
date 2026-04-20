@@ -175,7 +175,9 @@ def get_agent_messages():
 
 def save_message(msg):
     page_id = msg.get('page_id')
+    logger.info(f"💾 save_message called: page_id={msg.get('page_id')}, text={msg.get('text', '')[:30]}")
     if page_id:
+        logger.info(f"💾 Writing to messages_{page_id}.json")
         f = get_messages_file(page_id)
         messages = load_messages(page_id)
         messages.insert(0, msg)
@@ -184,6 +186,8 @@ def save_message(msg):
             with open(f, 'w') as fp: json.dump(messages, fp)
         except Exception as e:
             logger.error(f"Failed to write page messages: {e}")
+    else:
+        logger.warning("⚠️ save_message called WITHOUT page_id!")
     messages = load_messages()
     messages.insert(0, msg)
     messages = messages[:15]
@@ -871,7 +875,27 @@ def instagram_send():
 @app.route('/api/recent-messages')
 def get_recent_messages():
     page_id = request.args.get('page_id')
-    return jsonify(load_messages(page_id))
+    logger.info(f"📖 /api/recent-messages called: page_id={page_id}")
+    messages = load_messages(page_id)
+    logger.info(f"📖 Returning {len(messages)} messages")
+    return jsonify(messages)
+
+@app.route('/api/test-save/<page_id>')
+def test_save(page_id):
+    save_message({
+        'page_id': page_id,
+        'sender_id': 'TEST',
+        'text': 'Test message from /api/test-save',
+        'timestamp': int(time.time() * 1000),
+        'event_type': 'message',
+        'asset_type': 'facebook'
+    })
+    saved = load_messages(page_id)
+    return jsonify({
+        'saved_count': len(saved),
+        'first_message': saved[0] if saved else None,
+        'file': f'messages_{page_id}.json'
+    })
 
 @app.route('/api/agent-messages')
 def get_agent_messages_api():
@@ -1257,7 +1281,7 @@ def webhook_event():
                     save_message({
                         'page_id': page_id,
                         'asset_id': page_id,
-                        'asset_type': 'page',
+                        'asset_type': 'facebook',
                         'sender_id': sender_id,
                         'text': text,
                         'event_type': event_type,
@@ -1279,7 +1303,7 @@ def webhook_event():
                                 save_message({
                                     'page_id': page_id,
                                     'asset_id': page_id,
-                                    'asset_type': 'page',
+                                    'asset_type': 'facebook',
                                     'sender_id': 'AUTO_REPLY',
                                     'text': f"NIVA: {reply_text} (ID: {res['message_id']})",
                                     'is_reply': True,
