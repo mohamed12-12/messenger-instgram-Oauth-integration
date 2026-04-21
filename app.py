@@ -676,7 +676,7 @@ def instagram_auth_callback():
             save_page_token(ig_id, target_page_token) # reuse for IG
             save_instagram_account_context(ig_id, username)
 
-            return redirect(url_for('instagram_dashboard_page', ig_account_id=ig_id))
+            return render_template('instagram_success.html', account_id=ig_id, username=username)
         
         error_msg = 'No Instagram Business Account found linked to your pages.'
         if page_list_count == 0:
@@ -1446,7 +1446,6 @@ def webhook_event():
                         }, ig_account_id=entry_id)
                     logger.info(f"✅ Saved Instagram event from {sender_id}: {event_type}")
         return "EVENT_RECEIVED", 200
-
     return "IGNORED", 200
 
 # ─── COMPLIANCE ENDPOINTS ─────────────────────────────────────────────────────
