@@ -1342,9 +1342,9 @@ def webhook_event():
                     sender_id = event.get('sender', {}).get('id')
                     last_webhook_info['sender_id'] = sender_id
 
-                    my_id = os.getenv('INSTAGRAM_ACCOUNT_ID')
-                    if sender_id == page_id or (my_id and sender_id == my_id):
-                        logger.info("Skipping echo from %s", sender_id)
+                    # Skip echo: only filter if sender is the page itself (page echoing its own messages)
+                    if sender_id == page_id:
+                        logger.info("Skipping Messenger echo from page itself: %s", sender_id)
                         continue
 
                     if 'message' in event:
