@@ -262,7 +262,57 @@ def fallback_intent_classification(message_text: str, conversation_history: str)
         return {'intent': 'faq', 'confidence': 0.78, 'requires_human': False, 'reason': 'General FAQ detected.'}
     return {'intent': 'unknown', 'confidence': 0.4, 'requires_human': False, 'reason': 'Fallback classifier had low certainty.'}
 
+def has_explicit_human_request(message_text: str) -> bool:
+    lowered = (message_text or '').strip().lower()
+    explicit_phrases = (
+        'human',
+        'human agent',
+        'real person',
+        'support',
+        'speak to support',
+        'customer service',
+        'representative',
+        'agent',
+        'need a person',
+        'موظف',
+        'شخص حقيقي',
+        'دعم',
+        'خدمة العملاء',
+        'مساعدة',
+        'الدعم الفني',
+        'عايز اكلم شخص',
+        'محتاج موظف'
+    )
+    return any(phrase in lowered for phrase in explicit_phrases)
+
+def coerce_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {'true', '1', 'yes'}
+    if isinstance(value, (int, float)):
+        return value != 0
+    return bool(value)
+
 def classify_user_intent(message_text, conversation_history):
+    if has_explicit_human_request(message_text):
+        classification = {
+            'intent': 'human_request',
+            'confidence': 0.99,
+            'requires_human': True,
+            'reason': 'Explicit human-support request detected.',
+            'source': 'rule_override'
+        }
+        logger.info(
+            "Intent classification override message=%s intent=%s confidence=%.2f requires_human=%s source=%s",
+            message_text[:80],
+            classification['intent'],
+            classification['confidence'],
+            classification['requires_human'],
+            classification['source']
+        )
+        return classification
+
     system_instruction = (
         "You classify customer-support messages for Nanovate.io, an AI agent platform for business automation. "
         "Return only JSON with keys intent, confidence, requires_human, reason. "
@@ -281,7 +331,7 @@ def classify_user_intent(message_text, conversation_history):
         classification = {
             'intent': str(result.get('intent', 'unknown')).strip().lower(),
             'confidence': float(result.get('confidence', 0.0)),
-            'requires_human': bool(result.get('requires_human', False)),
+            'requires_human': coerce_bool(result.get('requires_human', False)),
             'reason': str(result.get('reason', ''))
         }
         logger.info(
@@ -325,7 +375,7 @@ def should_escalate_to_human(classification: dict, existing_state: dict | None, 
         return False, 'Classifier does not require human support.'
     if classification.get('confidence', 0.0) <= INTENT_ESCALATION_CONFIDENCE_THRESHOLD:
         return False, 'Confidence below escalation threshold.'
-    if existing_state and existing_state.get('escalated_at'):
+    if existing_state and existing_state.get('status') == 'human_agent_required' and existing_state.get('escalated_at'):
         if int(timestamp) - int(existing_state.get('escalated_at') or 0) < ESCALATION_COOLDOWN_MS:
             return False, 'Escalation cooldown active.'
     return True, classification.get('reason', 'Classifier requested human escalation.')
