@@ -38,6 +38,11 @@ SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
 HUMAN_AGENT_ALERT_TO = os.getenv('HUMAN_AGENT_ALERT_TO')
 HUMAN_AGENT_ALERT_FROM = os.getenv('HUMAN_AGENT_ALERT_FROM') or SMTP_USERNAME
 APP_BASE_URL = os.getenv('APP_BASE_URL', 'https://messenger-integration.nanovate.io')
+HUMAN_AGENT_DEFAULT_NAME = os.getenv('HUMAN_AGENT_DEFAULT_NAME', 'Alex')
+HUMAN_AGENT_ESCALATION_MESSAGE = os.getenv(
+    'HUMAN_AGENT_ESCALATION_MESSAGE',
+    "Thanks for reaching out! Let me connect you with a human agent who can help."
+)
 
 # Flask App Initialization
 app = Flask(__name__)
@@ -155,6 +160,11 @@ def list_human_agent_conversations(platform=None, page_id=None, status='human_ag
             continue
         if status and item.get('status') != status:
             continue
+        item = dict(item)
+        last_user_ts = item.get('last_user_message_timestamp')
+        if last_user_ts:
+            item['human_agent_window_expires_at'] = int(last_user_ts) + HUMAN_AGENT_WINDOW_MS
+            item['within_human_agent_window'] = within_human_agent_window(item)
         filtered.append(item)
     filtered.sort(key=lambda item: item.get('last_user_message_timestamp', 0), reverse=True)
     return filtered
@@ -234,6 +244,8 @@ def send_human_agent_email_alert(conversation):
         return False
 
 def mark_human_agent_required(platform, page_id, sender_id, latest_user_message, timestamp):
+    existing = get_human_agent_state(platform, page_id, sender_id)
+    was_already_escalated = bool(existing and existing.get('status') == 'human_agent_required')
     summary = build_conversation_summary(platform, page_id, sender_id)
     conversation = save_human_agent_state(platform, page_id, sender_id, {
         'status': 'human_agent_required',
@@ -242,10 +254,13 @@ def mark_human_agent_required(platform, page_id, sender_id, latest_user_message,
         'resolved_at': None,
         'last_user_message_timestamp': timestamp,
         'last_user_message': latest_user_message,
-        'conversation_summary': summary
+        'conversation_summary': summary,
+        'assigned_agent_name': HUMAN_AGENT_DEFAULT_NAME
     })
     logger.info("Human agent escalation detected for %s", conversation.get('key'))
-    email_sent = send_human_agent_email_alert(conversation)
+    email_sent = conversation.get('email_alert_sent', False)
+    if not was_already_escalated:
+        email_sent = send_human_agent_email_alert(conversation)
     conversation = save_human_agent_state(platform, page_id, sender_id, {'email_alert_sent': email_sent})
     logger.info("AI disabled for escalated conversation %s", conversation.get('key'))
     return conversation
@@ -517,6 +532,52 @@ def send_human_agent_graph_message(recipient_id: str, text: str, page_access_tok
         return data
     except Exception as e:
         return {'error': str(e)}
+
+def send_escalation_acknowledgement(platform: str, page_id: str, sender_id: str, page_access_token: str) -> dict:
+    result = send_graph_message(sender_id, HUMAN_AGENT_ESCALATION_MESSAGE, page_access_token)
+    if 'message_id' not in result:
+        logger.error("Failed to send escalation acknowledgement for %s:%s:%s payload=%s", platform, page_id, sender_id, result)
+        return result
+
+    timestamp = int(time.time() * 1000)
+    if platform == 'instagram':
+        save_message({
+            'page_id': page_id,
+            'asset_id': page_id,
+            'asset_type': 'instagram',
+            'sender_id': 'AUTO_REPLY',
+            'recipient_id': sender_id,
+            'text': HUMAN_AGENT_ESCALATION_MESSAGE,
+            'timestamp': timestamp,
+            'is_reply': True,
+            'source': 'instagram_escalation_ack'
+        })
+        save_instagram_message({
+            'page_id': page_id,
+            'asset_id': page_id,
+            'asset_type': 'instagram',
+            'sender_id': 'AUTO_REPLY',
+            'recipient_id': sender_id,
+            'text': HUMAN_AGENT_ESCALATION_MESSAGE,
+            'timestamp': timestamp,
+            'direction': 'outbound',
+            'source': 'instagram_escalation_ack'
+        }, ig_account_id=page_id)
+    else:
+        save_message({
+            'page_id': page_id,
+            'asset_id': page_id,
+            'asset_type': 'page',
+            'sender_id': 'AUTO_REPLY',
+            'recipient_id': sender_id,
+            'text': HUMAN_AGENT_ESCALATION_MESSAGE,
+            'timestamp': timestamp,
+            'is_reply': True,
+            'source': 'messenger_escalation_ack'
+        })
+
+    logger.info("Escalation acknowledgement sent for %s:%s:%s", platform, page_id, sender_id)
+    return result
 
 def post_messenger_control(path: str, payload: dict, page_access_token: str) -> dict:
     resp = requests.post(
@@ -1200,7 +1261,17 @@ def instagram_webhook_event(agent_id=None):
             inbound_ts = messaging.get('timestamp', int(time.time() * 1000))
             state = update_human_agent_activity('instagram', entry_id, sender_id, raw_text, inbound_ts)
             if is_human_agent_keyword(raw_text):
+                existing_escalation = bool(state and state.get('status') == 'human_agent_required')
                 mark_human_agent_required('instagram', entry_id, sender_id, raw_text, inbound_ts)
+                if not existing_escalation:
+                    token = None
+                    if agent_id:
+                        agent_data = get_chat_agent_by_id(agent_id)
+                        token = agent_data.get("instagram_token")
+                    if not token:
+                        token = get_instagram_page_token(entry_id)
+                    if token:
+                        send_escalation_acknowledgement('instagram', entry_id, sender_id, token)
                 continue
             if state and state.get('status') == 'human_agent_required':
                 logger.info("Skipping Instagram AI reply because conversation %s requires human agent", state.get('key'))
@@ -1730,27 +1801,30 @@ def human_agent_reply():
         return jsonify({'success': False, 'error': result.get('error') or str(result)}), 400
 
     timestamp = int(time.time() * 1000)
+    assigned_agent_name = conversation.get('assigned_agent_name') or HUMAN_AGENT_DEFAULT_NAME
     if platform == 'instagram':
         save_message({
             'page_id': page_id,
             'asset_id': page_id,
             'asset_type': 'instagram',
-            'sender_id': 'HUMAN_AGENT',
+            'sender_id': assigned_agent_name,
             'recipient_id': recipient_id,
             'text': message,
             'timestamp': timestamp,
             'is_reply': True,
+            'message_tag': 'HUMAN_AGENT',
             'source': 'instagram_human_agent_reply'
         })
         save_instagram_message({
             'page_id': page_id,
             'asset_id': page_id,
             'asset_type': 'instagram',
-            'sender_id': 'HUMAN_AGENT',
+            'sender_id': assigned_agent_name,
             'recipient_id': recipient_id,
             'text': message,
             'timestamp': timestamp,
             'direction': 'outbound',
+            'message_tag': 'HUMAN_AGENT',
             'source': 'instagram_human_agent_reply'
         }, ig_account_id=page_id)
     else:
@@ -1758,18 +1832,20 @@ def human_agent_reply():
             'page_id': page_id,
             'asset_id': page_id,
             'asset_type': 'page',
-            'sender_id': 'HUMAN_AGENT',
+            'sender_id': assigned_agent_name,
             'recipient_id': recipient_id,
             'text': message,
             'timestamp': timestamp,
             'is_reply': True,
+            'message_tag': 'HUMAN_AGENT',
             'source': 'messenger_human_agent_reply'
         })
 
     save_human_agent_state(platform, page_id, recipient_id, {
         'conversation_summary': build_conversation_summary(platform, page_id, recipient_id),
         'last_human_reply_timestamp': timestamp,
-        'last_human_reply': message
+        'last_human_reply': message,
+        'assigned_agent_name': assigned_agent_name
     })
     logger.info("Human reply sent for conversation %s", conversation.get('key'))
     return jsonify({'success': True, 'result': result})
@@ -1999,7 +2075,12 @@ def webhook_event():
 
                     state = update_human_agent_activity('messenger', page_id, sender_id, raw_text, ts)
                     if is_human_agent_keyword(raw_text):
+                        existing_escalation = bool(state and state.get('status') == 'human_agent_required')
                         mark_human_agent_required('messenger', page_id, sender_id, raw_text, ts)
+                        if not existing_escalation:
+                            token = get_page_token(page_id)
+                            if token:
+                                send_escalation_acknowledgement('messenger', page_id, sender_id, token)
                         continue
                     if state and state.get('status') == 'human_agent_required':
                         logger.info("Skipping Messenger AI reply because conversation %s requires human agent", state.get('key'))
@@ -2077,7 +2158,12 @@ def webhook_event():
                         }, ig_account_id=entry_id)
                         state = update_human_agent_activity('instagram', entry_id, sender_id, raw_text, msg_ts)
                         if is_human_agent_keyword(raw_text):
+                            existing_escalation = bool(state and state.get('status') == 'human_agent_required')
                             mark_human_agent_required('instagram', entry_id, sender_id, raw_text, msg_ts)
+                            if not existing_escalation:
+                                token = get_instagram_page_token(entry_id)
+                                if token:
+                                    send_escalation_acknowledgement('instagram', entry_id, sender_id, token)
                         elif state and state.get('status') == 'human_agent_required':
                             logger.info("Instagram fallback webhook recorded message for escalated conversation %s", state.get('key'))
                     logger.info(f"✅ Saved Instagram event from {sender_id}: {event_type}")

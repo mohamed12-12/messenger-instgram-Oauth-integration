@@ -269,6 +269,10 @@
                         <button type="button" id="humanReplyBtn" class="btn-send" style="background:#111827; width:auto; padding:12px 18px;">Send Human Agent Reply</button>
                         <button type="button" id="humanResolveBtn" class="btn-send" style="background:#6B7280; width:auto; padding:12px 18px;">Resolve Conversation</button>
                     </div>
+                    <div style="background:#fff7ed; border:1px solid #fdba74; color:#9a3412; border-radius:12px; padding:14px 16px; margin-top:16px; font-size:13px;">
+                        <strong>Tag Applied On Send:</strong> <code>HUMAN_AGENT</code><br>
+                        Assigned support agent: <strong>Alex</strong>
+                    </div>
                     <div id="responseMsg" style="margin-top: 16px; font-size: 14px; font-weight: 500; text-align: center;"></div>
                 </div>
 
@@ -330,8 +334,8 @@
                 humanAgentList.innerHTML = conversations.map(item => `
                     <div class="message-item">
                         <div class="sender-id" style="cursor:pointer;" onclick="document.getElementById('recipient_psid').value='${item.sender_id}'">User PSID: ${item.sender_id}</div>
-                        <div class="message-text"><span style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Agent Required</span><br>${item.last_user_message || ''}</div>
-                        <div class="timestamp">${new Date(item.last_user_message_timestamp).toLocaleString()}</div>
+                        <div class="message-text"><span style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Agent Required</span><br>Assigned: ${item.assigned_agent_name || 'Alex'}<br>${item.last_user_message || ''}</div>
+                        <div class="timestamp">${new Date(item.last_user_message_timestamp).toLocaleString()} | 7-day window ${item.within_human_agent_window ? 'open' : 'expired'}</div>
                     </div>
                 `).join('');
             } catch (err) {
@@ -398,6 +402,7 @@
                         <div class="message-item">
                             <div class="sender-id">User PSID: ${msg.sender_id}</div>
                             ${escalatedRecipients.has(String(msg.sender_id)) ? '<div style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Agent Required</div>' : ''}
+                            ${msg.message_tag === 'HUMAN_AGENT' ? '<div style="display:inline-block;background:#E0F2FE;color:#075985;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">HUMAN_AGENT tag</div>' : ''}
                             <div class="message-text">${msg.text}</div>
                             <div class="timestamp" style="font-size: 10px; color: #9CA3AF; text-align: right; margin-top: 6px;">
                                 ${new Date(msg.timestamp).toLocaleString()}

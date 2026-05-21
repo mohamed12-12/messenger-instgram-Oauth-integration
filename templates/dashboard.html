@@ -410,6 +410,10 @@
                 <div class="thread-tools">
                     <h2>Human Agent</h2>
                     <p class="desc">Use Human Agent replies only for escalated support conversations within the 7-day window.</p>
+                    <div style="background:#fff7ed; border:1px solid #fdba74; color:#9a3412; border-radius:12px; padding:14px 16px; margin-bottom:16px; font-size:13px;">
+                        <strong>Tag Applied On Send:</strong> <code>HUMAN_AGENT</code><br>
+                        Assigned support agent: <strong>Alex</strong>
+                    </div>
                     <div class="tool-row">
                         <button type="button" class="btn-tool" id="btn-human-reply">Send Human Agent Reply</button>
                         <button type="button" class="btn-tool" id="btn-human-resolve">Resolve Conversation</button>
@@ -521,8 +525,8 @@
                 humanAgentList.innerHTML = conversations.map(item => `
                     <div class="msg-item">
                         <div class="psid" onclick="copyPSID('${item.sender_id}')">PSID: ${item.sender_id}</div>
-                        <div class="text"><strong>Human Agent Required</strong><br>${item.last_user_message || ''}</div>
-                        <div class="meta">${new Date(item.last_user_message_timestamp).toLocaleString()}</div>
+                        <div class="text"><strong>Human Agent Required</strong><br>Assigned: ${item.assigned_agent_name || 'Alex'}<br>${item.last_user_message || ''}</div>
+                        <div class="meta">${new Date(item.last_user_message_timestamp).toLocaleString()} | 7-day window ${item.within_human_agent_window ? 'open' : 'expired'}</div>
                     </div>
                 `).join('');
             } catch (err) {
@@ -545,9 +549,9 @@
                 feed.innerHTML = messages.map(m => `
                     <div class="msg-item ${m.is_reply ? 'is-reply' : ''}">
                         <div class="psid" ${m.is_reply ? '' : `onclick="copyPSID('${m.sender_id}')" title="Click to copy PSID"`}>
-                            ${m.is_reply ? 'NANAVATE BOT' : `PSID: ${m.sender_id}`}
+                            ${m.is_reply ? (m.sender_id || 'NANOVATE BOT') : `PSID: ${m.sender_id}`}
                         </div>
-                        <div class="text">${escalatedRecipients.has(String(m.sender_id)) ? '<span style="display:inline-block;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">Human Agent Required</span><br>' : ''}"${m.text}"</div>
+                        <div class="text">${escalatedRecipients.has(String(m.sender_id)) ? '<span style="display:inline-block;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">Human Agent Required</span><br>' : ''}${m.message_tag === 'HUMAN_AGENT' ? '<span style="display:inline-block;background:#e0f2fe;color:#075985;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">HUMAN_AGENT tag</span><br>' : ''}"${m.text}"</div>
                         <div class="meta">${m.source || 'messenger_webhook'}${m.asset_type ? ` | ${m.asset_type}` : ''}${m.asset_id ? ` | ${m.asset_id}` : ''}</div>
                     </div>
                 `).join('');
