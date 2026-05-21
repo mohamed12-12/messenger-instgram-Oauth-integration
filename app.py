@@ -1534,12 +1534,8 @@ def instagram_webhook_event(agent_id=None):
                 agent_data['classification'] = classification
                 token = agent_data.get("instagram_token") or get_instagram_page_token(entry_id)
                 if token:
-                    disclosure = ""
-                    if sender_id not in first_messages_sent:
-                        disclosure = f"{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}\n\n"
-                        first_messages_sent.add(sender_id)
                     response_text = asyncio.run(generate_response(raw_text, agent_data))
-                    full_reply = f"{disclosure}{response_text}"
+                    full_reply = response_text
                     send_instagram_message(sender_id, full_reply, token)
                     save_message({
                         'page_id': entry_id,
@@ -2436,15 +2432,11 @@ def webhook_event():
                         elif load_config().get('auto_response'):
                             token = get_instagram_page_token(entry_id)
                             if token:
-                                disclosure = ""
-                                if sender_id not in first_messages_sent:
-                                    disclosure = f"{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}\n\n"
-                                    first_messages_sent.add(sender_id)
                                 agent_data = get_chat_agent_by_id('instagram-default')
                                 agent_data['conversation_history'] = intent_result['conversation_history']
                                 agent_data['classification'] = classification
                                 response_text = asyncio.run(generate_response(raw_text, agent_data))
-                                full_reply = f"{disclosure}{response_text}"
+                                full_reply = response_text
                                 send_instagram_message(sender_id, full_reply, token)
                                 save_message({
                                     'page_id': entry_id,
