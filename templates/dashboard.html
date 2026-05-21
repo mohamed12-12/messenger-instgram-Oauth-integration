@@ -525,7 +525,7 @@
                 humanAgentList.innerHTML = conversations.map(item => `
                     <div class="msg-item">
                         <div class="psid" onclick="copyPSID('${item.sender_id}')">PSID: ${item.sender_id}</div>
-                        <div class="text"><strong>Human Agent Required</strong><br>Assigned: ${item.assigned_agent_name || 'Alex'}<br>${item.last_user_message || ''}</div>
+                        <div class="text"><strong>Human Agent Required</strong><br>Assigned: ${item.assigned_agent_name || 'Alex'}<br>Intent: ${item.last_intent || 'unknown'} (${Number(item.last_intent_confidence || 0).toFixed(2)})<br>${item.last_user_message || ''}</div>
                         <div class="meta">${new Date(item.last_user_message_timestamp).toLocaleString()} | 7-day window ${item.within_human_agent_window ? 'open' : 'expired'}</div>
                     </div>
                 `).join('');
@@ -551,8 +551,8 @@
                         <div class="psid" ${m.is_reply ? '' : `onclick="copyPSID('${m.sender_id}')" title="Click to copy PSID"`}>
                             ${m.is_reply ? (m.sender_id || 'NANOVATE BOT') : `PSID: ${m.sender_id}`}
                         </div>
-                        <div class="text">${escalatedRecipients.has(String(m.sender_id)) ? '<span style="display:inline-block;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">Human Agent Required</span><br>' : ''}${m.message_tag === 'HUMAN_AGENT' ? '<span style="display:inline-block;background:#e0f2fe;color:#075985;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">HUMAN_AGENT tag</span><br>' : ''}"${m.text}"</div>
-                        <div class="meta">${m.source || 'messenger_webhook'}${m.asset_type ? ` | ${m.asset_type}` : ''}${m.asset_id ? ` | ${m.asset_id}` : ''}</div>
+                        <div class="text">${escalatedRecipients.has(String(m.sender_id)) ? '<span style="display:inline-block;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">Human Escalated</span><br>' : (m.ai_status === 'ai_handled' ? '<span style="display:inline-block;background:#dcfce7;color:#166534;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">AI Handled</span><br>' : '')}${m.message_tag === 'HUMAN_AGENT' ? '<span style="display:inline-block;background:#e0f2fe;color:#075985;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">HUMAN_AGENT tag</span><br>' : ''}"${m.text}"</div>
+                        <div class="meta">${m.source || 'messenger_webhook'}${m.asset_type ? ` | ${m.asset_type}` : ''}${m.asset_id ? ` | ${m.asset_id}` : ''}${m.intent ? ` | intent: ${m.intent}` : ''}${m.intent_confidence !== undefined ? ` | confidence: ${Number(m.intent_confidence).toFixed(2)}` : ''}</div>
                     </div>
                 `).join('');
             } catch (err) { console.error(err); }

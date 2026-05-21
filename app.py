@@ -43,6 +43,11 @@ HUMAN_AGENT_ESCALATION_MESSAGE = os.getenv(
     'HUMAN_AGENT_ESCALATION_MESSAGE',
     "Thanks for reaching out! Let me connect you with a human agent who can help."
 )
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+INTENT_ESCALATION_CONFIDENCE_THRESHOLD = float(os.getenv('INTENT_ESCALATION_CONFIDENCE_THRESHOLD', '0.75'))
+LOW_CONFIDENCE_THRESHOLD = float(os.getenv('LOW_CONFIDENCE_THRESHOLD', '0.55'))
+ESCALATION_COOLDOWN_MS = int(os.getenv('ESCALATION_COOLDOWN_MS', '3600000'))
 
 # Flask App Initialization
 app = Flask(__name__)
@@ -146,6 +151,16 @@ def build_conversation_summary(platform, page_id, sender_id, limit=5):
         summary_lines.append(f'{author}: {text}')
     return '\n'.join(summary_lines)
 
+def build_ai_conversation_history(platform, page_id, sender_id, limit=6):
+    history = get_conversation_history(platform, page_id, sender_id, limit=limit)
+    lines = []
+    for msg in reversed(history):
+        speaker = 'customer'
+        if msg.get('is_reply') or msg.get('direction') == 'outbound':
+            speaker = 'agent'
+        lines.append(f"{speaker}: {msg.get('text', '')}")
+    return '\n'.join(lines) if lines else 'No prior history.'
+
 def get_human_agent_state(platform, page_id, sender_id):
     conversations = get_human_agent_conversations()
     return conversations.get(build_human_agent_key(platform, page_id, sender_id))
@@ -185,20 +200,195 @@ def save_human_agent_state(platform, page_id, sender_id, updates):
         'last_user_message_timestamp': None,
         'last_user_message': '',
         'conversation_summary': '',
-        'email_alert_sent': False
+        'email_alert_sent': False,
+        'last_intent': 'unknown',
+        'last_intent_confidence': 0.0,
+        'last_intent_reason': '',
+        'last_ai_status': 'unclassified',
+        'last_classifier_source': 'fallback'
     })
     current.update(updates)
     conversations[key] = current
     save_human_agent_conversations(conversations)
     return current
 
-def is_human_agent_keyword(text: str) -> bool:
-    lowered = (text or '').strip().lower()
-    if not lowered:
-        return False
-    if any(keyword in lowered for keyword in HUMAN_AGENT_KEYWORDS_EN):
-        return True
-    return any(keyword in lowered for keyword in HUMAN_AGENT_KEYWORDS_AR)
+def call_gemini_json(system_instruction: str, user_prompt: str) -> dict:
+    if not GEMINI_API_KEY:
+        raise RuntimeError('GEMINI_API_KEY is not configured.')
+
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
+    payload = {
+        'systemInstruction': {
+            'parts': [{'text': system_instruction}]
+        },
+        'contents': [{
+            'parts': [{'text': user_prompt}]
+        }],
+        'generationConfig': {
+            'responseMimeType': 'application/json',
+            'temperature': 0.2
+        }
+    }
+    logger.info("Gemini request start model=%s", GEMINI_MODEL)
+    response = requests.post(
+        url,
+        headers={
+            'x-goog-api-key': GEMINI_API_KEY,
+            'Content-Type': 'application/json'
+        },
+        json=payload,
+        timeout=15
+    )
+    logger.info("Gemini request end model=%s status=%s", GEMINI_MODEL, response.status_code)
+    response.raise_for_status()
+    body = response.json()
+    parts = (((body.get('candidates') or [{}])[0].get('content') or {}).get('parts') or [])
+    raw_text = ''.join(part.get('text', '') for part in parts).strip()
+    if not raw_text:
+        raise ValueError('Gemini returned empty content.')
+    return json.loads(raw_text)
+
+def fallback_intent_classification(message_text: str, conversation_history: str) -> dict:
+    lowered = (message_text or '').strip().lower()
+    if lowered in {'hi', 'hello', 'hey', 'hola', 'مرحبا', 'اهلا', 'السلام عليكم'}:
+        return {'intent': 'greeting', 'confidence': 0.95, 'requires_human': False, 'reason': 'Simple greeting detected.'}
+    if any(phrase in lowered for phrase in ('price', 'pricing', 'cost', 'demo', 'service', 'instagram automation', 'messenger automation', 'lead generation')):
+        return {'intent': 'sales', 'confidence': 0.82, 'requires_human': False, 'reason': 'General sales or product inquiry detected.'}
+    if any(phrase in lowered for phrase in ('human support', 'real person', 'speak to support', 'billing issue', 'payment issue', 'refund', 'محتاج موظف', 'عايز اكلم شخص', 'الدعم الفني')):
+        return {'intent': 'human_request', 'confidence': 0.92, 'requires_human': True, 'reason': 'Explicit human-support request or billing issue detected.'}
+    if any(phrase in lowered for phrase in ('error', 'bug', 'not working', 'problem', 'issue', 'technical', 'cannot login', 'مش شغال', 'مشكلة')):
+        return {'intent': 'technical', 'confidence': 0.8, 'requires_human': True, 'reason': 'Technical issue likely needs human help.'}
+    if any(phrase in lowered for phrase in ('what do you do', 'services', 'features', 'hours', 'working hours', 'onboarding')):
+        return {'intent': 'faq', 'confidence': 0.78, 'requires_human': False, 'reason': 'General FAQ detected.'}
+    return {'intent': 'unknown', 'confidence': 0.4, 'requires_human': False, 'reason': 'Fallback classifier had low certainty.'}
+
+def classify_user_intent(message_text, conversation_history):
+    system_instruction = (
+        "You classify customer-support messages for Nanovate.io, an AI agent platform for business automation. "
+        "Return only JSON with keys intent, confidence, requires_human, reason. "
+        "Valid intents: greeting, faq, sales, support, technical, human_request, complaint, unknown. "
+        "Do not escalate greetings. Only set requires_human true for explicit human requests, billing/payment disputes, "
+        "sensitive account-specific issues, unresolved technical problems, strong frustration, or explicit rejection of AI help."
+    )
+    user_prompt = (
+        f"Conversation history:\n{conversation_history}\n\n"
+        f"Latest customer message:\n{message_text}\n\n"
+        "Classify this message for a business support AI assistant."
+    )
+
+    try:
+        result = call_gemini_json(system_instruction, user_prompt)
+        classification = {
+            'intent': str(result.get('intent', 'unknown')).strip().lower(),
+            'confidence': float(result.get('confidence', 0.0)),
+            'requires_human': bool(result.get('requires_human', False)),
+            'reason': str(result.get('reason', ''))
+        }
+        logger.info(
+            "Intent classification message=%s intent=%s confidence=%.2f requires_human=%s source=gemini",
+            message_text[:80],
+            classification['intent'],
+            classification['confidence'],
+            classification['requires_human']
+        )
+        classification['source'] = 'gemini'
+        return classification
+    except Exception:
+        logger.exception("Gemini intent classification failed; using fallback classifier.")
+        classification = fallback_intent_classification(message_text, conversation_history)
+        classification['source'] = 'fallback'
+        logger.info(
+            "Intent classification fallback message=%s intent=%s confidence=%.2f requires_human=%s",
+            message_text[:80],
+            classification['intent'],
+            classification['confidence'],
+            classification['requires_human']
+        )
+        return classification
+
+def build_fallback_ai_response(message_text: str, classification: dict) -> str:
+    intent = classification.get('intent')
+    if intent == 'greeting':
+        return "Hello! Welcome to Nanovate AI Agent Platform. How can I help you today?"
+    if intent == 'sales':
+        return "Nanovate helps businesses automate Instagram and Messenger conversations with AI agents for support, lead generation, and sales workflows. If you'd like, I can explain the best setup for your business."
+    if intent == 'faq':
+        return "Nanovate provides AI agents for Instagram and Messenger automation, customer support, lead capture, social media engagement, and business workflow automation. Tell me what you'd like to achieve and I can guide you."
+    if intent == 'technical':
+        return "I can help with common setup and automation questions. If this issue is account-specific or remains unresolved, I can connect you with a human support agent."
+    if classification.get('confidence', 0) < LOW_CONFIDENCE_THRESHOLD:
+        return "Would you like me to connect you with a human support agent?"
+    return "I’m here to help with Nanovate’s AI agents, Instagram automation, Messenger automation, lead generation, and customer support workflows. What would you like to know?"
+
+def should_escalate_to_human(classification: dict, existing_state: dict | None, timestamp: int) -> tuple[bool, str]:
+    if not classification.get('requires_human'):
+        return False, 'Classifier does not require human support.'
+    if classification.get('confidence', 0.0) <= INTENT_ESCALATION_CONFIDENCE_THRESHOLD:
+        return False, 'Confidence below escalation threshold.'
+    if existing_state and existing_state.get('escalated_at'):
+        if int(timestamp) - int(existing_state.get('escalated_at') or 0) < ESCALATION_COOLDOWN_MS:
+            return False, 'Escalation cooldown active.'
+    return True, classification.get('reason', 'Classifier requested human escalation.')
+
+def handle_customer_intent(platform, page_id, sender_id, raw_text, timestamp):
+    conversation_history = build_ai_conversation_history(platform, page_id, sender_id)
+    existing_state = get_human_agent_state(platform, page_id, sender_id)
+    classification = classify_user_intent(raw_text, conversation_history)
+    escalate, escalation_reason = should_escalate_to_human(classification, existing_state, timestamp)
+
+    ai_status = 'ai_handled'
+    if existing_state and existing_state.get('status') == 'human_agent_required' and existing_state.get('ai_disabled'):
+        ai_status = 'human_escalated'
+    if classification.get('confidence', 0.0) < LOW_CONFIDENCE_THRESHOLD and not classification.get('requires_human'):
+        ai_status = 'clarify_offer'
+    if escalate:
+        ai_status = 'human_escalated'
+
+    state_updates = {
+        'last_user_message_timestamp': timestamp,
+        'last_user_message': raw_text,
+        'conversation_summary': build_conversation_summary(platform, page_id, sender_id),
+        'last_intent': classification.get('intent', 'unknown'),
+        'last_intent_confidence': classification.get('confidence', 0.0),
+        'last_intent_reason': classification.get('reason', ''),
+        'last_ai_status': ai_status,
+        'last_classifier_source': classification.get('source', 'fallback')
+    }
+    if not existing_state:
+        state_updates['status'] = 'open'
+        state_updates['ai_disabled'] = False
+
+    state = save_human_agent_state(platform, page_id, sender_id, state_updates)
+    logger.info(
+        "Intent decision platform=%s sender=%s intent=%s confidence=%.2f ai_status=%s escalate=%s reason=%s",
+        platform,
+        sender_id,
+        classification.get('intent'),
+        classification.get('confidence', 0.0),
+        ai_status,
+        escalate,
+        escalation_reason
+    )
+
+    message_updates = {
+        'intent': classification.get('intent', 'unknown'),
+        'intent_confidence': classification.get('confidence', 0.0),
+        'intent_reason': classification.get('reason', ''),
+        'ai_status': ai_status
+    }
+    if platform == 'instagram':
+        annotate_recent_instagram_message(page_id, sender_id, message_updates)
+    else:
+        annotate_recent_page_message(page_id, sender_id, message_updates)
+
+    return {
+        'classification': classification,
+        'state': state,
+        'escalate': escalate,
+        'escalation_reason': escalation_reason,
+        'ai_status': ai_status,
+        'conversation_history': conversation_history
+    }
 
 def get_dashboard_link(platform, page_id):
     if platform == 'instagram':
@@ -328,6 +518,35 @@ def load_json_list(path):
 def save_json_list(path, items):
     with open(path, 'w') as f:
         json.dump(items, f)
+
+def annotate_recent_instagram_message(ig_account_id, sender_id, updates):
+    messages = load_instagram_messages(ig_account_id)
+    changed = False
+    for msg in messages:
+        if str(msg.get('sender_id')) != str(sender_id):
+            continue
+        if msg.get('direction') != 'inbound':
+            continue
+        msg.update(updates)
+        changed = True
+        break
+    if changed:
+        save_json_list(build_instagram_messages_file(ig_account_id), messages)
+
+def annotate_recent_page_message(page_id, sender_id, updates):
+    path = get_messages_file(page_id)
+    messages = load_messages(page_id)
+    changed = False
+    for msg in messages:
+        if str(msg.get('sender_id')) != str(sender_id):
+            continue
+        if msg.get('is_reply'):
+            continue
+        msg.update(updates)
+        changed = True
+        break
+    if changed:
+        save_json_list(path, messages)
 
 def save_page_webhook_debug(page_id, endpoint, data, headers):
     if not page_id:
@@ -884,6 +1103,37 @@ async def generate_response(text: str, agent_data: dict) -> str:
     else:
         return f"I received your message: '{text}'. Our team will get back to you soon!"
 
+async def generate_response(text: str, agent_data: dict) -> str:
+    conversation_history = agent_data.get('conversation_history', 'No prior history.')
+    classification = agent_data.get('classification') or fallback_intent_classification(text, conversation_history)
+    system_instruction = (
+        "You are Nanovate AI, a concise, professional, business-oriented bilingual customer support assistant. "
+        "Nanovate offers AI agents for Instagram automation, Messenger automation, customer support automation, "
+        "lead generation, AI sales agents, onboarding support, and business automation. "
+        "Answer directly and helpfully. Do not escalate unless the user asks for human help. "
+        "Keep replies under 80 words."
+    )
+    user_prompt = (
+        f"Conversation history:\n{conversation_history}\n\n"
+        f"Detected intent: {classification.get('intent')} with confidence {classification.get('confidence')}\n"
+        f"Reason: {classification.get('reason')}\n\n"
+        f"Customer message:\n{text}\n\n"
+        "Return JSON with one key named response."
+    )
+
+    try:
+        result = call_gemini_json(system_instruction, user_prompt)
+        response_text = str(result.get('response', '')).strip()
+        if response_text:
+            logger.info("AI handled response generated for intent=%s confidence=%.2f", classification.get('intent'), classification.get('confidence', 0.0))
+            return response_text
+    except Exception:
+        logger.exception("Gemini response generation failed; using fallback response.")
+
+    response_text = build_fallback_ai_response(text, classification)
+    logger.info("AI handled fallback response generated for intent=%s confidence=%.2f", classification.get('intent'), classification.get('confidence', 0.0))
+    return response_text
+
 def send_instagram_message(recipient_id: str, text: str, page_access_token: str):
     return send_graph_message(recipient_id, text, page_access_token)
 
@@ -1259,26 +1509,29 @@ def instagram_webhook_event(agent_id=None):
             logger.info(f"✅ Saved inbound message from {sender_id}: '{raw_text}'")
 
             inbound_ts = messaging.get('timestamp', int(time.time() * 1000))
-            state = update_human_agent_activity('instagram', entry_id, sender_id, raw_text, inbound_ts)
-            if is_human_agent_keyword(raw_text):
-                existing_escalation = bool(state and state.get('status') == 'human_agent_required')
+            intent_result = handle_customer_intent('instagram', entry_id, sender_id, raw_text, inbound_ts)
+            classification = intent_result['classification']
+            current_state = intent_result['state']
+
+            if intent_result['escalate']:
                 mark_human_agent_required('instagram', entry_id, sender_id, raw_text, inbound_ts)
-                if not existing_escalation:
-                    token = None
-                    if agent_id:
-                        agent_data = get_chat_agent_by_id(agent_id)
-                        token = agent_data.get("instagram_token")
-                    if not token:
-                        token = get_instagram_page_token(entry_id)
-                    if token:
-                        send_escalation_acknowledgement('instagram', entry_id, sender_id, token)
+                token = None
+                if agent_id:
+                    agent_data = get_chat_agent_by_id(agent_id)
+                    token = agent_data.get("instagram_token")
+                if not token:
+                    token = get_instagram_page_token(entry_id)
+                if token:
+                    send_escalation_acknowledgement('instagram', entry_id, sender_id, token)
                 continue
-            if state and state.get('status') == 'human_agent_required':
-                logger.info("Skipping Instagram AI reply because conversation %s requires human agent", state.get('key'))
+            if current_state and current_state.get('status') == 'human_agent_required' and current_state.get('ai_disabled'):
+                logger.info("False escalation prevention active: skipping Instagram AI reply because conversation %s is already escalated", current_state.get('key'))
                 continue
 
             if load_config().get('auto_response') or agent_id:
                 agent_data = get_chat_agent_by_id(agent_id or 'instagram-default')
+                agent_data['conversation_history'] = intent_result['conversation_history']
+                agent_data['classification'] = classification
                 token = agent_data.get("instagram_token") or get_instagram_page_token(entry_id)
                 if token:
                     disclosure = ""
@@ -1296,6 +1549,9 @@ def instagram_webhook_event(agent_id=None):
                         'text': full_reply,
                         'timestamp': int(time.time() * 1000),
                         'is_reply': True,
+                        'intent': classification.get('intent', 'unknown'),
+                        'intent_confidence': classification.get('confidence', 0.0),
+                        'ai_status': intent_result['ai_status'],
                         'source': 'instagram_auto_reply'
                     })
                     save_instagram_message({
@@ -1306,9 +1562,12 @@ def instagram_webhook_event(agent_id=None):
                         'text': full_reply,
                         'timestamp': int(time.time() * 1000),
                         'direction': 'outbound',
+                        'intent': classification.get('intent', 'unknown'),
+                        'intent_confidence': classification.get('confidence', 0.0),
+                        'ai_status': intent_result['ai_status'],
                         'source': 'instagram_auto_reply'
                     }, ig_account_id=entry_id)
-                    logger.info("Sent Instagram auto-reply to %s for account %s", sender_id, entry_id)
+                    logger.info("AI handled response sent for Instagram sender=%s intent=%s confidence=%.2f", sender_id, classification.get('intent'), classification.get('confidence', 0.0))
 
     return "EVENT_RECEIVED", 200
 
@@ -2072,23 +2331,29 @@ def webhook_event():
 
                     logger.info("Saved %s message from %s for page %s", source_name, sender_id, page_id)
 
-                    state = update_human_agent_activity('messenger', page_id, sender_id, raw_text, ts)
-                    if is_human_agent_keyword(raw_text):
-                        existing_escalation = bool(state and state.get('status') == 'human_agent_required')
+                    intent_result = handle_customer_intent('messenger', page_id, sender_id, raw_text, ts)
+                    classification = intent_result['classification']
+                    current_state = intent_result['state']
+                    if intent_result['escalate']:
                         mark_human_agent_required('messenger', page_id, sender_id, raw_text, ts)
-                        if not existing_escalation:
-                            token = get_page_token(page_id)
-                            if token:
-                                send_escalation_acknowledgement('messenger', page_id, sender_id, token)
+                        token = get_page_token(page_id)
+                        if token:
+                            send_escalation_acknowledgement('messenger', page_id, sender_id, token)
                         continue
-                    if state and state.get('status') == 'human_agent_required':
-                        logger.info("Skipping Messenger AI reply because conversation %s requires human agent", state.get('key'))
+                    if current_state and current_state.get('status') == 'human_agent_required' and current_state.get('ai_disabled'):
+                        logger.info("False escalation prevention active: skipping Messenger AI reply because conversation %s is already escalated", current_state.get('key'))
                         continue
 
                     if channel_name == 'messaging' and load_config().get('auto_response'):
                         token = get_page_token(page_id)
                         if token:
-                            reply_text = "hello I am niva, how can I help? "
+                            agent_data = {
+                                'id': 'messenger-default',
+                                'name': 'Nanovate AI',
+                                'conversation_history': intent_result['conversation_history'],
+                                'classification': classification
+                            }
+                            reply_text = asyncio.run(generate_response(raw_text, agent_data))
                             res = send_graph_message(sender_id, reply_text, token)
                             if 'message_id' in res:
                                 save_message({
@@ -2098,6 +2363,9 @@ def webhook_event():
                                     'sender_id': 'AUTO_REPLY',
                                     'text': f"NIVA: {reply_text} (ID: {res['message_id']})",
                                     'is_reply': True,
+                                    'intent': classification.get('intent', 'unknown'),
+                                    'intent_confidence': classification.get('confidence', 0.0),
+                                    'ai_status': intent_result['ai_status'],
                                     'timestamp': int(time.time() * 1000),
                                     'source': 'messenger_auto_reply'
                                 })
@@ -2155,16 +2423,16 @@ def webhook_event():
                             'direction': 'inbound',
                             'source': 'messenger_webhook_ig'
                         }, ig_account_id=entry_id)
-                        state = update_human_agent_activity('instagram', entry_id, sender_id, raw_text, msg_ts)
-                        if is_human_agent_keyword(raw_text):
-                            existing_escalation = bool(state and state.get('status') == 'human_agent_required')
+                        intent_result = handle_customer_intent('instagram', entry_id, sender_id, raw_text, msg_ts)
+                        classification = intent_result['classification']
+                        current_state = intent_result['state']
+                        if intent_result['escalate']:
                             mark_human_agent_required('instagram', entry_id, sender_id, raw_text, msg_ts)
-                            if not existing_escalation:
-                                token = get_instagram_page_token(entry_id)
-                                if token:
-                                    send_escalation_acknowledgement('instagram', entry_id, sender_id, token)
-                        elif state and state.get('status') == 'human_agent_required':
-                            logger.info("Instagram fallback webhook recorded message for escalated conversation %s", state.get('key'))
+                            token = get_instagram_page_token(entry_id)
+                            if token:
+                                send_escalation_acknowledgement('instagram', entry_id, sender_id, token)
+                        elif current_state and current_state.get('status') == 'human_agent_required' and current_state.get('ai_disabled'):
+                            logger.info("Instagram fallback webhook recorded message for escalated conversation %s", current_state.get('key'))
                         elif load_config().get('auto_response'):
                             token = get_instagram_page_token(entry_id)
                             if token:
@@ -2173,6 +2441,8 @@ def webhook_event():
                                     disclosure = f"{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}\n\n"
                                     first_messages_sent.add(sender_id)
                                 agent_data = get_chat_agent_by_id('instagram-default')
+                                agent_data['conversation_history'] = intent_result['conversation_history']
+                                agent_data['classification'] = classification
                                 response_text = asyncio.run(generate_response(raw_text, agent_data))
                                 full_reply = f"{disclosure}{response_text}"
                                 send_instagram_message(sender_id, full_reply, token)
@@ -2184,6 +2454,9 @@ def webhook_event():
                                     'text': full_reply,
                                     'timestamp': int(time.time() * 1000),
                                     'is_reply': True,
+                                    'intent': classification.get('intent', 'unknown'),
+                                    'intent_confidence': classification.get('confidence', 0.0),
+                                    'ai_status': intent_result['ai_status'],
                                     'source': 'instagram_auto_reply_fallback'
                                 })
                                 save_instagram_message({
@@ -2194,6 +2467,9 @@ def webhook_event():
                                     'text': full_reply,
                                     'timestamp': int(time.time() * 1000),
                                     'direction': 'outbound',
+                                    'intent': classification.get('intent', 'unknown'),
+                                    'intent_confidence': classification.get('confidence', 0.0),
+                                    'ai_status': intent_result['ai_status'],
                                     'source': 'instagram_auto_reply_fallback'
                                 }, ig_account_id=entry_id)
                                 logger.info("Sent Instagram fallback auto-reply to %s for account %s", sender_id, entry_id)

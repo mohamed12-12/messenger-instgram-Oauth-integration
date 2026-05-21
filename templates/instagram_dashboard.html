@@ -334,7 +334,7 @@
                 humanAgentList.innerHTML = conversations.map(item => `
                     <div class="message-item">
                         <div class="sender-id" style="cursor:pointer;" onclick="document.getElementById('recipient_psid').value='${item.sender_id}'">User PSID: ${item.sender_id}</div>
-                        <div class="message-text"><span style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Agent Required</span><br>Assigned: ${item.assigned_agent_name || 'Alex'}<br>${item.last_user_message || ''}</div>
+                        <div class="message-text"><span style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Agent Required</span><br>Assigned: ${item.assigned_agent_name || 'Alex'}<br>Intent: ${item.last_intent || 'unknown'} (${Number(item.last_intent_confidence || 0).toFixed(2)})<br>${item.last_user_message || ''}</div>
                         <div class="timestamp">${new Date(item.last_user_message_timestamp).toLocaleString()} | 7-day window ${item.within_human_agent_window ? 'open' : 'expired'}</div>
                     </div>
                 `).join('');
@@ -401,11 +401,11 @@
                     feed.innerHTML = data.map(msg => `
                         <div class="message-item">
                             <div class="sender-id">User PSID: ${msg.sender_id}</div>
-                            ${escalatedRecipients.has(String(msg.sender_id)) ? '<div style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Agent Required</div>' : ''}
+                            ${escalatedRecipients.has(String(msg.sender_id)) ? '<div style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Escalated</div>' : (msg.ai_status === 'ai_handled' ? '<div style="display:inline-block;background:#DCFCE7;color:#166534;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">AI Handled</div>' : '')}
                             ${msg.message_tag === 'HUMAN_AGENT' ? '<div style="display:inline-block;background:#E0F2FE;color:#075985;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">HUMAN_AGENT tag</div>' : ''}
                             <div class="message-text">${msg.text}</div>
                             <div class="timestamp" style="font-size: 10px; color: #9CA3AF; text-align: right; margin-top: 6px;">
-                                ${new Date(msg.timestamp).toLocaleString()}
+                                ${new Date(msg.timestamp).toLocaleString()}${msg.intent ? ` | intent: ${msg.intent}` : ''}${msg.intent_confidence !== undefined ? ` | confidence: ${Number(msg.intent_confidence).toFixed(2)}` : ''}
                             </div>
                         </div>
                     `).join('');
