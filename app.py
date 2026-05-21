@@ -1277,10 +1277,9 @@ def instagram_webhook_event(agent_id=None):
                 logger.info("Skipping Instagram AI reply because conversation %s requires human agent", state.get('key'))
                 continue
 
-            # AI Auto-Responder (only when agent_id route is used)
-            if agent_id:
-                agent_data = get_chat_agent_by_id(agent_id)
-                token = agent_data.get("instagram_token")
+            if load_config().get('auto_response') or agent_id:
+                agent_data = get_chat_agent_by_id(agent_id or 'instagram-default')
+                token = agent_data.get("instagram_token") or get_instagram_page_token(entry_id)
                 if token:
                     disclosure = ""
                     if sender_id not in first_messages_sent:
@@ -1309,7 +1308,7 @@ def instagram_webhook_event(agent_id=None):
                         'direction': 'outbound',
                         'source': 'instagram_auto_reply'
                     }, ig_account_id=entry_id)
-                    logger.info(f"📤 Sent auto-reply to {sender_id}")
+                    logger.info("Sent Instagram auto-reply to %s for account %s", sender_id, entry_id)
 
     return "EVENT_RECEIVED", 200
 
@@ -2166,6 +2165,38 @@ def webhook_event():
                                     send_escalation_acknowledgement('instagram', entry_id, sender_id, token)
                         elif state and state.get('status') == 'human_agent_required':
                             logger.info("Instagram fallback webhook recorded message for escalated conversation %s", state.get('key'))
+                        elif load_config().get('auto_response'):
+                            token = get_instagram_page_token(entry_id)
+                            if token:
+                                disclosure = ""
+                                if sender_id not in first_messages_sent:
+                                    disclosure = f"{DISCLOSURE_EN}\n\n{DISCLOSURE_AR}\n\n"
+                                    first_messages_sent.add(sender_id)
+                                agent_data = get_chat_agent_by_id('instagram-default')
+                                response_text = asyncio.run(generate_response(raw_text, agent_data))
+                                full_reply = f"{disclosure}{response_text}"
+                                send_instagram_message(sender_id, full_reply, token)
+                                save_message({
+                                    'page_id': entry_id,
+                                    'asset_id': entry_id,
+                                    'asset_type': 'instagram',
+                                    'sender_id': 'AUTO_REPLY',
+                                    'text': full_reply,
+                                    'timestamp': int(time.time() * 1000),
+                                    'is_reply': True,
+                                    'source': 'instagram_auto_reply_fallback'
+                                })
+                                save_instagram_message({
+                                    'page_id': entry_id,
+                                    'asset_id': entry_id,
+                                    'asset_type': 'instagram',
+                                    'sender_id': 'AUTO_REPLY',
+                                    'text': full_reply,
+                                    'timestamp': int(time.time() * 1000),
+                                    'direction': 'outbound',
+                                    'source': 'instagram_auto_reply_fallback'
+                                }, ig_account_id=entry_id)
+                                logger.info("Sent Instagram fallback auto-reply to %s for account %s", sender_id, entry_id)
                     logger.info(f"✅ Saved Instagram event from {sender_id}: {event_type}")
         return "EVENT_RECEIVED", 200
     return "IGNORED", 200
