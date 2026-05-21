@@ -381,36 +381,132 @@ def format_graph_api_error(exc: Exception, default_message: str) -> tuple[str, i
     return message or default_message, response.status_code or 500
 
 def fetch_instagram_media_comments(ig_account_id: str, page_access_token: str) -> list:
-    media_items = graph_get_all_items(f'{ig_account_id}/media', {
+    logger.info("Instagram comments fetch started for account %s", ig_account_id)
+
+    media_params = {
         'fields': 'id,media_type,media_url,thumbnail_url,timestamp',
+        'limit': 5,
         'access_token': page_access_token
-    })
+    }
+    media_url = f'{GRAPH_BASE}/{ig_account_id}/media'
+
+    logger.info("Graph GET start: %s params=%s", media_url, {'fields': media_params['fields'], 'limit': media_params['limit']})
+    try:
+        media_response = requests.get(media_url, params=media_params, timeout=15)
+    except requests.Timeout:
+        logger.error("Graph GET timeout while fetching media for account %s", ig_account_id)
+        raise
+
+    logger.info("Graph GET end: %s status=%s", media_url, media_response.status_code)
+    media_response.raise_for_status()
+    media_payload = media_response.json()
+    logger.info(
+        "Media fetch response for %s: data_count=%s paging_next=%s",
+        ig_account_id,
+        len(media_payload.get('data', [])),
+        bool(media_payload.get('paging', {}).get('next'))
+    )
+
+    media_items = media_payload.get('data', [])[:5]
+    if not media_items:
+        logger.info("No media found for Instagram account %s", ig_account_id)
+        return []
 
     comments = []
     for media in media_items:
         media_id = media.get('id')
         if not media_id:
+            logger.warning("Skipping media item without id for account %s: %s", ig_account_id, media)
             continue
 
-        media_comments = graph_get_all_items(f'{media_id}/comments', {
+        logger.info("Fetching comments for media %s", media_id)
+        next_url = f'{GRAPH_BASE}/{media_id}/comments'
+        next_params = {
             'fields': 'id,text,username,timestamp,hidden',
             'access_token': page_access_token
-        })
+        }
+        seen_comment_pages = set()
+        page_index = 0
+        media_comment_count = 0
 
-        for comment in media_comments:
-            comments.append({
-                'comment_id': comment.get('id'),
-                'media_id': media_id,
-                'media_type': media.get('media_type'),
-                'media_url': media.get('media_url'),
-                'thumbnail_url': media.get('thumbnail_url'),
-                'comment_text': comment.get('text', ''),
-                'username': comment.get('username', 'unknown'),
-                'timestamp': comment.get('timestamp'),
-                'hidden': bool(comment.get('hidden', False))
-            })
+        while next_url and page_index < 10:
+            page_index += 1
+            page_key = next_url
+            if page_key in seen_comment_pages:
+                logger.warning("Stopping comment pagination loop for media %s due to repeated next URL: %s", media_id, next_url)
+                break
+            seen_comment_pages.add(page_key)
+
+            logger.info(
+                "Graph GET start: %s params=%s page=%s media_id=%s",
+                next_url,
+                {'fields': next_params.get('fields')} if next_params else {},
+                page_index,
+                media_id
+            )
+            try:
+                comments_response = requests.get(next_url, params=next_params, timeout=15)
+            except requests.Timeout:
+                logger.error("Graph GET timeout while fetching comments for media %s page %s", media_id, page_index)
+                raise
+
+            logger.info(
+                "Graph GET end: %s status=%s page=%s media_id=%s",
+                next_url,
+                comments_response.status_code,
+                page_index,
+                media_id
+            )
+            comments_response.raise_for_status()
+            comments_payload = comments_response.json()
+
+            page_comments = comments_payload.get('data', [])
+            logger.info(
+                "Comments fetch response for media %s: page=%s data_count=%s paging_next=%s",
+                media_id,
+                page_index,
+                len(page_comments),
+                bool(comments_payload.get('paging', {}).get('next'))
+            )
+
+            if not page_comments:
+                logger.info("No comments returned for media %s on page %s", media_id, page_index)
+                break
+
+            for comment in page_comments:
+                if not comment.get('id'):
+                    logger.warning("Skipping malformed comment for media %s: %s", media_id, comment)
+                    continue
+                comments.append({
+                    'comment_id': comment.get('id'),
+                    'media_id': media_id,
+                    'media_type': media.get('media_type'),
+                    'media_url': media.get('media_url'),
+                    'thumbnail_url': media.get('thumbnail_url'),
+                    'comment_text': comment.get('text', ''),
+                    'username': comment.get('username', 'unknown'),
+                    'timestamp': comment.get('timestamp'),
+                    'hidden': bool(comment.get('hidden', False))
+                })
+                media_comment_count += 1
+
+            next_url = comments_payload.get('paging', {}).get('next')
+            next_params = None
+            logger.info(
+                "Comments pagination status for media %s: next_url_present=%s accumulated_comments=%s",
+                media_id,
+                bool(next_url),
+                media_comment_count
+            )
+
+        if page_index >= 10 and next_url:
+            logger.warning("Stopped comment pagination for media %s after reaching page safety cap", media_id)
+
+        if media_comment_count == 0:
+            logger.info("Media %s has no accessible comments or comments may be disabled", media_id)
 
     comments.sort(key=lambda item: item.get('timestamp') or '', reverse=True)
+    logger.info("Instagram comments fetch completed for account %s with %s comments", ig_account_id, len(comments))
     return comments
 
 def format_oauth_exchange_error(exc: Exception, platform_name: str) -> str:
@@ -993,11 +1089,20 @@ def instagram_comments_api():
         return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
 
     try:
+        logger.info("Handling /api/instagram/comments for account %s", ig_account_id)
         comments = fetch_instagram_media_comments(ig_account_id, token)
+        if not comments:
+            logger.info("No comments found for account %s", ig_account_id)
+            return jsonify({'success': True, 'comments': [], 'message': 'No comments found'})
+        logger.info("Returning %s comments for account %s", len(comments), ig_account_id)
         return jsonify({'success': True, 'comments': comments})
     except requests.HTTPError as e:
+        logger.exception("Meta Graph HTTP error while fetching comments for %s", ig_account_id)
         error_message, status_code = format_graph_api_error(e, 'Failed to fetch Instagram comments.')
         return jsonify({'success': False, 'error': error_message}), status_code
+    except requests.Timeout:
+        logger.exception("Meta Graph timeout while fetching comments for %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'Meta request timed out while fetching Instagram comments.'}), 504
     except Exception:
         logger.exception("Unexpected error while fetching Instagram comments for %s", ig_account_id)
         return jsonify({'success': False, 'error': 'Failed to fetch Instagram comments.'}), 500
