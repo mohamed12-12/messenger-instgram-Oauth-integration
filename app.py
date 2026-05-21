@@ -25,7 +25,7 @@ SECRET_KEY      = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123')
 
 # Instagram Specific Configuration
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
-INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_business_manage_comments,instagram_business_basic,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
+INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
 
 # Flask App Initialization
 app = Flask(__name__)
