@@ -7,11 +7,13 @@ import hmac
 import hashlib
 import requests
 import secrets
+import smtplib
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, send_from_directory
 from collections import deque
 import hmac as hmac_module
 from dotenv import load_dotenv
+from email.message import EmailMessage
 
 # ─── Load Environment ────────────────────────────────────────────────────────
 load_dotenv()
@@ -26,6 +28,16 @@ SECRET_KEY      = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123')
 # Instagram Specific Configuration
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
 INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
+HUMAN_AGENT_KEYWORDS_EN = ('human', 'support', 'representative', 'agent')
+HUMAN_AGENT_KEYWORDS_AR = ('موظف', 'شخص حقيقي', 'دعم', 'خدمة العملاء')
+HUMAN_AGENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+SMTP_HOST = os.getenv('SMTP_HOST')
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+SMTP_USERNAME = os.getenv('SMTP_USERNAME')
+SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
+HUMAN_AGENT_ALERT_TO = os.getenv('HUMAN_AGENT_ALERT_TO')
+HUMAN_AGENT_ALERT_FROM = os.getenv('HUMAN_AGENT_ALERT_FROM') or SMTP_USERNAME
+APP_BASE_URL = os.getenv('APP_BASE_URL', 'https://messenger-integration.nanovate.io')
 
 # Flask App Initialization
 app = Flask(__name__)
@@ -91,6 +103,176 @@ def save_instagram_account_context(ig_account_id, username):
     accounts = cfg.setdefault('instagram_accounts', {})
     accounts[str(ig_account_id)] = {'username': username}
     save_config(cfg)
+
+def get_human_agent_conversations():
+    cfg = load_config()
+    return cfg.setdefault('human_agent_conversations', {})
+
+def save_human_agent_conversations(conversations):
+    cfg = load_config()
+    cfg['human_agent_conversations'] = conversations
+    save_config(cfg)
+
+def build_human_agent_key(platform, page_id, sender_id):
+    return f'{platform}:{page_id}:{sender_id}'
+
+def get_conversation_history(platform, page_id, sender_id, limit=5):
+    if platform == 'instagram':
+        all_messages = load_instagram_messages(page_id)
+    else:
+        all_messages = load_messages(page_id)
+
+    history = [
+        msg for msg in all_messages
+        if str(msg.get('sender_id')) == str(sender_id) or msg.get('recipient_id') == str(sender_id)
+    ]
+    history.sort(key=lambda item: item.get('timestamp', 0), reverse=True)
+    return history[:limit]
+
+def build_conversation_summary(platform, page_id, sender_id, limit=5):
+    history = get_conversation_history(platform, page_id, sender_id, limit=limit)
+    if not history:
+        return 'No prior conversation history available.'
+
+    summary_lines = []
+    for msg in reversed(history):
+        author = msg.get('sender_id', 'unknown')
+        text = msg.get('text', '')
+        summary_lines.append(f'{author}: {text}')
+    return '\n'.join(summary_lines)
+
+def get_human_agent_state(platform, page_id, sender_id):
+    conversations = get_human_agent_conversations()
+    return conversations.get(build_human_agent_key(platform, page_id, sender_id))
+
+def list_human_agent_conversations(platform=None, page_id=None, status='human_agent_required'):
+    conversations = list(get_human_agent_conversations().values())
+    filtered = []
+    for item in conversations:
+        if platform and item.get('platform') != platform:
+            continue
+        if page_id and str(item.get('page_id')) != str(page_id):
+            continue
+        if status and item.get('status') != status:
+            continue
+        filtered.append(item)
+    filtered.sort(key=lambda item: item.get('last_user_message_timestamp', 0), reverse=True)
+    return filtered
+
+def save_human_agent_state(platform, page_id, sender_id, updates):
+    conversations = get_human_agent_conversations()
+    key = build_human_agent_key(platform, page_id, sender_id)
+    current = conversations.get(key, {
+        'key': key,
+        'platform': platform,
+        'page_id': str(page_id),
+        'sender_id': str(sender_id),
+        'status': 'open',
+        'ai_disabled': False,
+        'created_at': int(time.time() * 1000),
+        'escalated_at': None,
+        'resolved_at': None,
+        'last_user_message_timestamp': None,
+        'last_user_message': '',
+        'conversation_summary': '',
+        'email_alert_sent': False
+    })
+    current.update(updates)
+    conversations[key] = current
+    save_human_agent_conversations(conversations)
+    return current
+
+def is_human_agent_keyword(text: str) -> bool:
+    lowered = (text or '').strip().lower()
+    if not lowered:
+        return False
+    if any(keyword in lowered for keyword in HUMAN_AGENT_KEYWORDS_EN):
+        return True
+    return any(keyword in lowered for keyword in HUMAN_AGENT_KEYWORDS_AR)
+
+def get_dashboard_link(platform, page_id):
+    if platform == 'instagram':
+        return f'{APP_BASE_URL}/instagram/dashboard/{page_id}'
+    return f'{APP_BASE_URL}/dashboard/{page_id}'
+
+def send_human_agent_email_alert(conversation):
+    if not SMTP_HOST or not HUMAN_AGENT_ALERT_TO or not HUMAN_AGENT_ALERT_FROM:
+        logger.warning(
+            "Human agent email alert skipped due to missing SMTP configuration for conversation %s",
+            conversation.get('key')
+        )
+        return False
+
+    message = EmailMessage()
+    page_id = conversation.get('page_id')
+    platform = conversation.get('platform')
+    sender_id = conversation.get('sender_id')
+    message['Subject'] = f'Human agent required: {platform} conversation {sender_id}'
+    message['From'] = HUMAN_AGENT_ALERT_FROM
+    message['To'] = HUMAN_AGENT_ALERT_TO
+    message.set_content(
+        "Human agent escalation detected.\n\n"
+        f"Platform: {platform}\n"
+        f"Sender ID: {sender_id}\n"
+        f"Page/Account ID: {page_id}\n"
+        f"Latest user message: {conversation.get('last_user_message', '')}\n"
+        f"Dashboard link: {get_dashboard_link(platform, page_id)}\n\n"
+        "Conversation summary:\n"
+        f"{conversation.get('conversation_summary', 'No summary available.')}"
+    )
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
+            smtp.starttls()
+            if SMTP_USERNAME and SMTP_PASSWORD:
+                smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(message)
+        logger.info("Human agent email alert sent for conversation %s", conversation.get('key'))
+        return True
+    except Exception:
+        logger.exception("Failed to send human agent email alert for conversation %s", conversation.get('key'))
+        return False
+
+def mark_human_agent_required(platform, page_id, sender_id, latest_user_message, timestamp):
+    summary = build_conversation_summary(platform, page_id, sender_id)
+    conversation = save_human_agent_state(platform, page_id, sender_id, {
+        'status': 'human_agent_required',
+        'ai_disabled': True,
+        'escalated_at': timestamp,
+        'resolved_at': None,
+        'last_user_message_timestamp': timestamp,
+        'last_user_message': latest_user_message,
+        'conversation_summary': summary
+    })
+    logger.info("Human agent escalation detected for %s", conversation.get('key'))
+    email_sent = send_human_agent_email_alert(conversation)
+    conversation = save_human_agent_state(platform, page_id, sender_id, {'email_alert_sent': email_sent})
+    logger.info("AI disabled for escalated conversation %s", conversation.get('key'))
+    return conversation
+
+def update_human_agent_activity(platform, page_id, sender_id, latest_user_message, timestamp):
+    existing = get_human_agent_state(platform, page_id, sender_id)
+    if not existing:
+        return None
+
+    updates = {
+        'last_user_message_timestamp': timestamp,
+        'last_user_message': latest_user_message,
+        'conversation_summary': build_conversation_summary(platform, page_id, sender_id)
+    }
+    if existing.get('status') == 'resolved':
+        updates['status'] = 'open'
+    return save_human_agent_state(platform, page_id, sender_id, updates)
+
+def conversation_requires_human_agent(platform, page_id, sender_id):
+    state = get_human_agent_state(platform, page_id, sender_id)
+    return bool(state and state.get('status') == 'human_agent_required' and state.get('ai_disabled'))
+
+def within_human_agent_window(conversation):
+    last_user_ts = conversation.get('last_user_message_timestamp')
+    if not last_user_ts:
+        return False
+    return (int(time.time() * 1000) - int(last_user_ts)) <= HUMAN_AGENT_WINDOW_MS
 
 def get_saved_page_name(page_id):
     if not page_id:
@@ -315,6 +497,27 @@ def send_graph_message(recipient_id: str, text: str, page_access_token: str) -> 
     except Exception as e:
         return {'error': str(e)}
 
+def send_human_agent_graph_message(recipient_id: str, text: str, page_access_token: str) -> dict:
+    try:
+        resp = requests.post(
+            f'{GRAPH_BASE}/me/messages',
+            params={'access_token': page_access_token},
+            json={
+                'recipient': {'id': recipient_id},
+                'messaging_type': 'MESSAGE_TAG',
+                'tag': 'HUMAN_AGENT',
+                'message': {'text': text}
+            },
+            timeout=15
+        )
+        data = resp.json()
+        if not resp.ok:
+            message = data.get('error', {}).get('message', 'Unknown Human Agent send error')
+            raise requests.HTTPError(message, response=resp)
+        return data
+    except Exception as e:
+        return {'error': str(e)}
+
 def post_messenger_control(path: str, payload: dict, page_access_token: str) -> dict:
     resp = requests.post(
         f'{GRAPH_BASE}/{path}',
@@ -508,6 +711,9 @@ def fetch_instagram_media_comments(ig_account_id: str, page_access_token: str) -
     comments.sort(key=lambda item: item.get('timestamp') or '', reverse=True)
     logger.info("Instagram comments fetch completed for account %s with %s comments", ig_account_id, len(comments))
     return comments
+
+def fetch_instagram_comments(ig_account_id: str, page_access_token: str) -> list:
+    return fetch_instagram_media_comments(ig_account_id, page_access_token)
 
 def format_oauth_exchange_error(exc: Exception, platform_name: str) -> str:
     default_msg = f'{platform_name} login failed. Please click Connect again and do not refresh the callback page.'
@@ -991,6 +1197,15 @@ def instagram_webhook_event(agent_id=None):
             }, ig_account_id=entry_id)
             logger.info(f"✅ Saved inbound message from {sender_id}: '{raw_text}'")
 
+            inbound_ts = messaging.get('timestamp', int(time.time() * 1000))
+            state = update_human_agent_activity('instagram', entry_id, sender_id, raw_text, inbound_ts)
+            if is_human_agent_keyword(raw_text):
+                mark_human_agent_required('instagram', entry_id, sender_id, raw_text, inbound_ts)
+                continue
+            if state and state.get('status') == 'human_agent_required':
+                logger.info("Skipping Instagram AI reply because conversation %s requires human agent", state.get('key'))
+                continue
+
             # AI Auto-Responder (only when agent_id route is used)
             if agent_id:
                 agent_data = get_chat_agent_by_id(agent_id)
@@ -1090,7 +1305,7 @@ def instagram_comments_api():
 
     try:
         logger.info("Handling /api/instagram/comments for account %s", ig_account_id)
-        comments = fetch_instagram_media_comments(ig_account_id, token)
+        comments = fetch_instagram_comments(ig_account_id, token)
         if not comments:
             logger.info("No comments found for account %s", ig_account_id)
             return jsonify({'success': True, 'comments': [], 'message': 'No comments found'})
@@ -1477,6 +1692,113 @@ def toggle_auto_response():
 def get_config():
     return jsonify(load_config())
 
+@app.route('/api/human-agent/escalations')
+def human_agent_escalations():
+    platform = request.args.get('platform')
+    page_id = request.args.get('page_id')
+    status = request.args.get('status', 'human_agent_required')
+    escalations = list_human_agent_conversations(platform=platform, page_id=page_id, status=status)
+    return jsonify({'success': True, 'conversations': escalations})
+
+@app.route('/api/human-agent/reply', methods=['POST'])
+def human_agent_reply():
+    data = request.get_json(silent=True) or request.form
+    platform = (data.get('platform') or '').strip().lower()
+    recipient_id = (data.get('recipient_id') or '').strip()
+    page_id = (data.get('page_id') or '').strip()
+    message = (data.get('message') or '').strip()
+
+    if platform not in {'instagram', 'messenger'}:
+        return jsonify({'success': False, 'error': 'platform must be instagram or messenger'}), 400
+    if not recipient_id or not page_id or not message:
+        return jsonify({'success': False, 'error': 'platform, recipient_id, page_id, and message are required'}), 400
+
+    conversation = get_human_agent_state(platform, page_id, recipient_id)
+    if not conversation or conversation.get('status') != 'human_agent_required':
+        return jsonify({'success': False, 'error': 'Human Agent reply is only allowed for escalated conversations.'}), 400
+    if not within_human_agent_window(conversation):
+        logger.warning("Blocked human agent reply outside 7-day window for %s", conversation.get('key'))
+        return jsonify({'success': False, 'error': 'Human Agent reply window has expired for this conversation.'}), 403
+
+    token = get_instagram_page_token(page_id) if platform == 'instagram' else get_connected_page_token(page_id)
+    if not token:
+        return jsonify({'success': False, 'error': 'No page access token found for this conversation.'}), 401
+
+    result = send_human_agent_graph_message(recipient_id, message, token)
+    if 'message_id' not in result:
+        logger.error("Human agent reply failed for %s: %s", conversation.get('key'), result)
+        return jsonify({'success': False, 'error': result.get('error') or str(result)}), 400
+
+    timestamp = int(time.time() * 1000)
+    if platform == 'instagram':
+        save_message({
+            'page_id': page_id,
+            'asset_id': page_id,
+            'asset_type': 'instagram',
+            'sender_id': 'HUMAN_AGENT',
+            'recipient_id': recipient_id,
+            'text': message,
+            'timestamp': timestamp,
+            'is_reply': True,
+            'source': 'instagram_human_agent_reply'
+        })
+        save_instagram_message({
+            'page_id': page_id,
+            'asset_id': page_id,
+            'asset_type': 'instagram',
+            'sender_id': 'HUMAN_AGENT',
+            'recipient_id': recipient_id,
+            'text': message,
+            'timestamp': timestamp,
+            'direction': 'outbound',
+            'source': 'instagram_human_agent_reply'
+        }, ig_account_id=page_id)
+    else:
+        save_message({
+            'page_id': page_id,
+            'asset_id': page_id,
+            'asset_type': 'page',
+            'sender_id': 'HUMAN_AGENT',
+            'recipient_id': recipient_id,
+            'text': message,
+            'timestamp': timestamp,
+            'is_reply': True,
+            'source': 'messenger_human_agent_reply'
+        })
+
+    save_human_agent_state(platform, page_id, recipient_id, {
+        'conversation_summary': build_conversation_summary(platform, page_id, recipient_id),
+        'last_human_reply_timestamp': timestamp,
+        'last_human_reply': message
+    })
+    logger.info("Human reply sent for conversation %s", conversation.get('key'))
+    return jsonify({'success': True, 'result': result})
+
+@app.route('/api/human-agent/resolve', methods=['POST'])
+def human_agent_resolve():
+    data = request.get_json(silent=True) or request.form
+    platform = (data.get('platform') or '').strip().lower()
+    recipient_id = (data.get('recipient_id') or '').strip()
+    page_id = (data.get('page_id') or '').strip()
+
+    if platform not in {'instagram', 'messenger'}:
+        return jsonify({'success': False, 'error': 'platform must be instagram or messenger'}), 400
+    if not recipient_id or not page_id:
+        return jsonify({'success': False, 'error': 'platform, recipient_id, and page_id are required'}), 400
+
+    conversation = get_human_agent_state(platform, page_id, recipient_id)
+    if not conversation:
+        return jsonify({'success': False, 'error': 'Conversation not found.'}), 404
+
+    updated = save_human_agent_state(platform, page_id, recipient_id, {
+        'status': 'resolved',
+        'ai_disabled': False,
+        'resolved_at': int(time.time() * 1000),
+        'conversation_summary': build_conversation_summary(platform, page_id, recipient_id)
+    })
+    logger.info("Human agent conversation resolved for %s", updated.get('key'))
+    return jsonify({'success': True, 'conversation': updated})
+
 @app.route('/api/webhook-debug')
 def get_webhook_debug():
     if not os.path.exists(WEBHOOK_DEBUG_FILE):
@@ -1675,6 +1997,14 @@ def webhook_event():
 
                     logger.info("Saved %s message from %s for page %s", source_name, sender_id, page_id)
 
+                    state = update_human_agent_activity('messenger', page_id, sender_id, raw_text, ts)
+                    if is_human_agent_keyword(raw_text):
+                        mark_human_agent_required('messenger', page_id, sender_id, raw_text, ts)
+                        continue
+                    if state and state.get('status') == 'human_agent_required':
+                        logger.info("Skipping Messenger AI reply because conversation %s requires human agent", state.get('key'))
+                        continue
+
                     if channel_name == 'messaging' and load_config().get('auto_response'):
                         token = get_page_token(page_id)
                         if token:
@@ -1734,16 +2064,22 @@ def webhook_event():
                         'source': 'messenger_webhook_ig'
                     })
                     if event_type == 'message' and raw_text:
+                        msg_ts = messaging.get('timestamp', int(time.time() * 1000))
                         save_instagram_message({
                             'page_id': entry_id,
                             'asset_id': entry_id,
                             'asset_type': 'instagram',
                             'sender_id': sender_id,
                             'text': raw_text,
-                            'timestamp': messaging.get('timestamp', int(time.time() * 1000)),
+                            'timestamp': msg_ts,
                             'direction': 'inbound',
                             'source': 'messenger_webhook_ig'
                         }, ig_account_id=entry_id)
+                        state = update_human_agent_activity('instagram', entry_id, sender_id, raw_text, msg_ts)
+                        if is_human_agent_keyword(raw_text):
+                            mark_human_agent_required('instagram', entry_id, sender_id, raw_text, msg_ts)
+                        elif state and state.get('status') == 'human_agent_required':
+                            logger.info("Instagram fallback webhook recorded message for escalated conversation %s", state.get('key'))
                     logger.info(f"✅ Saved Instagram event from {sender_id}: {event_type}")
         return "EVENT_RECEIVED", 200
     return "IGNORED", 200

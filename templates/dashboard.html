@@ -408,6 +408,15 @@
                 <div id="result" class="result-box"></div>
 
                 <div class="thread-tools">
+                    <h2>Human Agent</h2>
+                    <p class="desc">Use Human Agent replies only for escalated support conversations within the 7-day window.</p>
+                    <div class="tool-row">
+                        <button type="button" class="btn-tool" id="btn-human-reply">Send Human Agent Reply</button>
+                        <button type="button" class="btn-tool" id="btn-human-resolve">Resolve Conversation</button>
+                    </div>
+                </div>
+
+                <div class="thread-tools">
                     <h2>Thread Control</h2>
                     <p class="desc">Check who owns the conversation thread and request or take control for the PSID above.</p>
                     <div class="tool-row">
@@ -424,6 +433,14 @@
                 <h3>Connection Debug</h3>
                 <div id="debug-box" class="debug-card">
                     <div class="line">Checking current page status...</div>
+                </div>
+            </div>
+            <div class="activity-card">
+                <h3>Escalated Conversations</h3>
+                <div id="human-agent-list" class="msg-list">
+                    <div
+                        style="text-align: center; color: #9ca3af; padding: 20px; border: 1px dashed #e5e7eb; border-radius: 10px; font-size: 13px;">
+                        No escalated conversations.</div>
                 </div>
             </div>
             <div class="activity-card">
@@ -450,6 +467,10 @@
         const btnOwner = document.getElementById('btn-owner');
         const btnRequestControl = document.getElementById('btn-request-control');
         const btnTakeControl = document.getElementById('btn-take-control');
+        const btnHumanReply = document.getElementById('btn-human-reply');
+        const btnHumanResolve = document.getElementById('btn-human-resolve');
+        const humanAgentList = document.getElementById('human-agent-list');
+        let escalatedRecipients = new Set();
 
         function copyPSID(id) { document.getElementById('recipient_id').value = id; }
 
@@ -483,6 +504,32 @@
             }
         }
 
+        async function fetchHumanAgentEscalations() {
+            try {
+                const response = await fetch(`/api/human-agent/escalations?platform=messenger&page_id=${encodeURIComponent(connectedPageId || '')}`);
+                const data = await response.json();
+                const conversations = data.conversations || [];
+                escalatedRecipients = new Set(conversations.map(item => String(item.sender_id)));
+                if (!conversations.length) {
+                    humanAgentList.innerHTML = `
+                        <div style="text-align: center; color: #9ca3af; padding: 20px; border: 1px dashed #e5e7eb; border-radius: 10px; font-size: 13px;">
+                            No escalated conversations.
+                        </div>
+                    `;
+                    return;
+                }
+                humanAgentList.innerHTML = conversations.map(item => `
+                    <div class="msg-item">
+                        <div class="psid" onclick="copyPSID('${item.sender_id}')">PSID: ${item.sender_id}</div>
+                        <div class="text"><strong>Human Agent Required</strong><br>${item.last_user_message || ''}</div>
+                        <div class="meta">${new Date(item.last_user_message_timestamp).toLocaleString()}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                humanAgentList.innerHTML = `<div class="text">Failed to load escalations.</div>`;
+            }
+        }
+
         async function updateFeed() {
             try {
                 const response = await fetch('/api/recent-messages?page_id={{ page_id }}');
@@ -500,7 +547,7 @@
                         <div class="psid" ${m.is_reply ? '' : `onclick="copyPSID('${m.sender_id}')" title="Click to copy PSID"`}>
                             ${m.is_reply ? 'NANAVATE BOT' : `PSID: ${m.sender_id}`}
                         </div>
-                        <div class="text">"${m.text}"</div>
+                        <div class="text">${escalatedRecipients.has(String(m.sender_id)) ? '<span style="display:inline-block;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">Human Agent Required</span><br>' : ''}"${m.text}"</div>
                         <div class="meta">${m.source || 'messenger_webhook'}${m.asset_type ? ` | ${m.asset_type}` : ''}${m.asset_id ? ` | ${m.asset_id}` : ''}</div>
                     </div>
                 `).join('');
@@ -579,11 +626,65 @@
             showResult(true, `<strong>${action} thread control:</strong> success`);
         }
 
+        async function sendHumanAgentReply() {
+            const recipientId = document.getElementById('recipient_id').value.trim();
+            const message = document.getElementById('message').value.trim();
+            if (!recipientId || !message) {
+                showResult(false, '<strong>Error:</strong> Enter both recipient PSID and message first.');
+                return;
+            }
+            const response = await fetch('/api/human-agent/reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform: 'messenger',
+                    recipient_id: recipientId,
+                    page_id: connectedPageId,
+                    message
+                })
+            });
+            const data = await response.json();
+            if (!data.success) {
+                showResult(false, `<strong>Error:</strong> ${data.error}`);
+                return;
+            }
+            showResult(true, '<strong>Success:</strong> Human Agent reply sent.');
+            updateFeed();
+        }
+
+        async function resolveHumanAgentConversation() {
+            const recipientId = document.getElementById('recipient_id').value.trim();
+            if (!recipientId) {
+                showResult(false, '<strong>Error:</strong> Enter the recipient PSID first.');
+                return;
+            }
+            const response = await fetch('/api/human-agent/resolve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform: 'messenger',
+                    recipient_id: recipientId,
+                    page_id: connectedPageId
+                })
+            });
+            const data = await response.json();
+            if (!data.success) {
+                showResult(false, `<strong>Error:</strong> ${data.error}`);
+                return;
+            }
+            showResult(true, '<strong>Success:</strong> Conversation resolved and AI re-enabled.');
+            fetchHumanAgentEscalations();
+            updateFeed();
+        }
+
         setInterval(updateFeed, 3000);
+        setInterval(fetchHumanAgentEscalations, 5000);
 
         btnOwner.onclick = fetchThreadOwner;
         btnRequestControl.onclick = () => runThreadControl('request');
         btnTakeControl.onclick = () => runThreadControl('take');
+        btnHumanReply.onclick = sendHumanAgentReply;
+        btnHumanResolve.onclick = resolveHumanAgentConversation;
 
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/debug/{{ page_id }}')
@@ -611,6 +712,7 @@
 
             updateFeed();
             fetchConfig();
+            fetchHumanAgentEscalations();
         });
 
         form.onsubmit = async (e) => {
