@@ -25,7 +25,7 @@ SECRET_KEY      = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123')
 
 # Instagram Specific Configuration
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
-INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
+INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_business_manage_comments,instagram_business_basic,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
 
 # Flask App Initialization
 app = Flask(__name__)
@@ -332,6 +332,86 @@ def graph_get(path: str, params: dict) -> dict:
     resp = requests.get(f'{GRAPH_BASE}/{path}', params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+def graph_post(path: str, params: dict = None, data: dict = None) -> dict:
+    resp = requests.post(
+        f'{GRAPH_BASE}/{path}',
+        params=params or {},
+        data=data or {},
+        timeout=10
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+def format_graph_api_error(exc: Exception, default_message: str) -> tuple[str, int]:
+    response = getattr(exc, 'response', None)
+    if response is None:
+        logger.exception("Graph API request failed without HTTP response.")
+        return default_message, 500
+
+    try:
+        payload = response.json()
+    except ValueError:
+        logger.error("Graph API returned non-JSON error response: %s", response.text)
+        return default_message, response.status_code or 500
+
+    error = payload.get('error', {})
+    code = error.get('code')
+    subcode = error.get('error_subcode')
+    message = error.get('message', default_message)
+    lowered = message.lower()
+
+    logger.error(
+        "Graph API error. status=%s code=%s subcode=%s message=%s",
+        response.status_code,
+        code,
+        subcode,
+        message
+    )
+
+    if code == 190:
+        return 'Instagram access token is missing or expired. Please reconnect your Instagram account.', 401
+    if code in (10, 200):
+        return 'Missing required Instagram comments permissions. Please ensure the account was reconnected with comment management scopes approved.', 403
+    if code == 100:
+        return 'Invalid Instagram comment or media ID.', 400
+    if code in (4, 17, 32, 613) or 'rate limit' in lowered or 'too many calls' in lowered:
+        return 'Instagram rate limit reached. Please try again shortly.', 429
+
+    return message or default_message, response.status_code or 500
+
+def fetch_instagram_media_comments(ig_account_id: str, page_access_token: str) -> list:
+    media_items = graph_get_all_items(f'{ig_account_id}/media', {
+        'fields': 'id,media_type,media_url,thumbnail_url,timestamp',
+        'access_token': page_access_token
+    })
+
+    comments = []
+    for media in media_items:
+        media_id = media.get('id')
+        if not media_id:
+            continue
+
+        media_comments = graph_get_all_items(f'{media_id}/comments', {
+            'fields': 'id,text,username,timestamp,hidden',
+            'access_token': page_access_token
+        })
+
+        for comment in media_comments:
+            comments.append({
+                'comment_id': comment.get('id'),
+                'media_id': media_id,
+                'media_type': media.get('media_type'),
+                'media_url': media.get('media_url'),
+                'thumbnail_url': media.get('thumbnail_url'),
+                'comment_text': comment.get('text', ''),
+                'username': comment.get('username', 'unknown'),
+                'timestamp': comment.get('timestamp'),
+                'hidden': bool(comment.get('hidden', False))
+            })
+
+    comments.sort(key=lambda item: item.get('timestamp') or '', reverse=True)
+    return comments
 
 def format_oauth_exchange_error(exc: Exception, platform_name: str) -> str:
     default_msg = f'{platform_name} login failed. Please click Connect again and do not refresh the callback page.'
@@ -879,6 +959,115 @@ def instagram_dashboard_page(ig_account_id):
                          messages=msgs,
                          token_error=token_error,
                          last_hit=last_webhook_info)
+
+@app.route('/instagram/comments/<ig_account_id>')
+def instagram_comments_page(ig_account_id):
+    ig_username = get_saved_instagram_username(ig_account_id) or "Unknown"
+    token = get_instagram_page_token(ig_account_id)
+
+    token_error = None
+    if token and token.startswith('IGAA'):
+        token_error = "CRITICAL: You are using an Instagram Basic Display token. This token cannot manage Instagram comments. Please reconnect using the Page-based OAuth flow."
+    elif not token:
+        token_error = "No Access Token found. Please connect your account first."
+
+    session['instagram_account_id'] = ig_account_id
+    session['instagram_username'] = ig_username
+
+    return render_template(
+        'instagram_comments.html',
+        username=ig_username,
+        account_id=ig_account_id,
+        token_error=token_error
+    )
+
+@app.route('/api/instagram/comments')
+def instagram_comments_api():
+    ig_account_id = request.args.get('ig_account_id') or session.get('instagram_account_id')
+    if not ig_account_id:
+        return jsonify({'success': False, 'error': 'Missing Instagram account ID.'}), 400
+
+    token = get_instagram_page_token(ig_account_id)
+    if not token:
+        logger.warning("Instagram comments fetch failed: missing token for account %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
+
+    try:
+        comments = fetch_instagram_media_comments(ig_account_id, token)
+        return jsonify({'success': True, 'comments': comments})
+    except requests.HTTPError as e:
+        error_message, status_code = format_graph_api_error(e, 'Failed to fetch Instagram comments.')
+        return jsonify({'success': False, 'error': error_message}), status_code
+    except Exception:
+        logger.exception("Unexpected error while fetching Instagram comments for %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'Failed to fetch Instagram comments.'}), 500
+
+@app.route('/api/instagram/reply-comment', methods=['POST'])
+def instagram_reply_comment():
+    data = request.get_json(silent=True) or request.form
+    ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
+    comment_id = (data.get('comment_id') or '').strip()
+    message = (data.get('message') or '').strip()
+
+    if not ig_account_id:
+        return jsonify({'success': False, 'error': 'Missing Instagram account ID.'}), 400
+    if not comment_id:
+        return jsonify({'success': False, 'error': 'Comment ID is required.'}), 400
+    if not message:
+        return jsonify({'success': False, 'error': 'Reply message is required.'}), 400
+
+    token = get_instagram_page_token(ig_account_id)
+    if not token:
+        logger.warning("Instagram comment reply failed: missing token for account %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
+
+    try:
+        result = graph_post(
+            f'{comment_id}/replies',
+            params={'access_token': token},
+            data={'message': message}
+        )
+        logger.info("Instagram comment reply sent for account %s comment %s", ig_account_id, comment_id)
+        return jsonify({'success': True, 'result': result})
+    except requests.HTTPError as e:
+        error_message, status_code = format_graph_api_error(e, 'Failed to reply to Instagram comment.')
+        return jsonify({'success': False, 'error': error_message}), status_code
+    except Exception:
+        logger.exception("Unexpected error while replying to Instagram comment %s", comment_id)
+        return jsonify({'success': False, 'error': 'Failed to reply to Instagram comment.'}), 500
+
+@app.route('/api/instagram/hide-comment', methods=['POST'])
+def instagram_hide_comment():
+    data = request.get_json(silent=True) or request.form
+    ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
+    comment_id = (data.get('comment_id') or '').strip()
+
+    if not ig_account_id:
+        return jsonify({'success': False, 'error': 'Missing Instagram account ID.'}), 400
+    if not comment_id:
+        return jsonify({'success': False, 'error': 'Comment ID is required.'}), 400
+
+    token = get_instagram_page_token(ig_account_id)
+    if not token:
+        logger.warning("Instagram hide comment failed: missing token for account %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
+
+    try:
+        result = graph_post(
+            comment_id,
+            params={
+                'access_token': token,
+                'hidden': 'true'
+            }
+        )
+        logger.info("Instagram comment hidden for account %s comment %s", ig_account_id, comment_id)
+        return jsonify({'success': True, 'result': result})
+    except requests.HTTPError as e:
+        error_message, status_code = format_graph_api_error(e, 'Failed to hide Instagram comment.')
+        return jsonify({'success': False, 'error': error_message}), status_code
+    except Exception:
+        logger.exception("Unexpected error while hiding Instagram comment %s", comment_id)
+        return jsonify({'success': False, 'error': 'Failed to hide Instagram comment.'}), 500
 
 @app.route('/instagram/send', methods=['POST'])
 def instagram_send():
