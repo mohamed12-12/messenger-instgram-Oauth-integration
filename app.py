@@ -928,6 +928,15 @@ def format_graph_api_error(exc: Exception, default_message: str) -> tuple[str, i
 
     return message or default_message, response.status_code or 500
 
+def extract_graph_api_error_payload(exc: Exception) -> dict:
+    response = getattr(exc, 'response', None)
+    if response is None:
+        return {}
+    try:
+        return response.json()
+    except ValueError:
+        return {'raw_response': response.text}
+
 def fetch_instagram_media_comments(ig_account_id: str, page_access_token: str) -> list:
     logger.info("Instagram comments fetch started for account %s", ig_account_id)
 
@@ -1763,6 +1772,7 @@ def instagram_hide_comment():
         return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
 
     try:
+        logger.info("Instagram hide comment request account=%s comment_id=%s", ig_account_id, comment_id)
         result = graph_post(
             comment_id,
             params={
@@ -1773,8 +1783,15 @@ def instagram_hide_comment():
         logger.info("Instagram comment hidden for account %s comment %s", ig_account_id, comment_id)
         return jsonify({'success': True, 'result': result})
     except requests.HTTPError as e:
+        raw_error = extract_graph_api_error_payload(e)
+        logger.error(
+            "Instagram hide comment Meta error account=%s comment_id=%s payload=%s",
+            ig_account_id,
+            comment_id,
+            raw_error
+        )
         error_message, status_code = format_graph_api_error(e, 'Failed to hide Instagram comment.')
-        return jsonify({'success': False, 'error': error_message}), status_code
+        return jsonify({'success': False, 'error': error_message, 'meta_error': raw_error}), status_code
     except Exception:
         logger.exception("Unexpected error while hiding Instagram comment %s", comment_id)
         return jsonify({'success': False, 'error': 'Failed to hide Instagram comment.'}), 500
@@ -1796,6 +1813,7 @@ def instagram_delete_comment():
         return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
 
     try:
+        logger.info("Instagram delete comment request account=%s comment_id=%s", ig_account_id, comment_id)
         result = graph_delete(
             comment_id,
             params={'access_token': token}
@@ -1803,8 +1821,15 @@ def instagram_delete_comment():
         logger.info("Instagram comment deleted for account %s comment %s", ig_account_id, comment_id)
         return jsonify({'success': True, 'result': result})
     except requests.HTTPError as e:
+        raw_error = extract_graph_api_error_payload(e)
+        logger.error(
+            "Instagram delete comment Meta error account=%s comment_id=%s payload=%s",
+            ig_account_id,
+            comment_id,
+            raw_error
+        )
         error_message, status_code = format_graph_api_error(e, 'Failed to delete Instagram comment.')
-        return jsonify({'success': False, 'error': error_message}), status_code
+        return jsonify({'success': False, 'error': error_message, 'meta_error': raw_error}), status_code
     except Exception:
         logger.exception("Unexpected error while deleting Instagram comment %s", comment_id)
         return jsonify({'success': False, 'error': 'Failed to delete Instagram comment.'}), 500

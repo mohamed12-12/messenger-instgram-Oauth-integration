@@ -369,6 +369,7 @@
                                     <strong>@${escapeHtml(comment.username)}</strong>
                                     <span>${formatTimestamp(comment.timestamp)}</span>
                                 </div>
+                                <div class="media-id">Comment ID: ${escapeHtml(comment.comment_id)}</div>
                                 <div class="media-id">Media/Post ID: ${escapeHtml(comment.media_id)}</div>
                                 <div class="comment-text">${escapeHtml(comment.comment_text)}</div>
                                 <div class="actions">
@@ -475,7 +476,8 @@
                 const data = await response.json();
 
                 if (!response.ok || !data.success) {
-                    status.textContent = data.error || 'Hide failed.';
+                    const metaDetails = data.meta_error ? ` Meta: ${JSON.stringify(data.meta_error)}` : '';
+                    status.textContent = (data.error || 'Hide failed.') + metaDetails;
                     status.style.color = '#DC2626';
                     setCommentActionState(commentId, false);
                     return;
@@ -526,7 +528,8 @@
                 const data = await response.json();
 
                 if (!response.ok || !data.success) {
-                    status.textContent = data.error || 'Delete failed.';
+                    const metaDetails = data.meta_error ? ` Meta: ${JSON.stringify(data.meta_error)}` : '';
+                    status.textContent = (data.error || 'Delete failed.') + metaDetails;
                     status.style.color = '#DC2626';
                     setCommentActionState(commentId, false);
                     return;
