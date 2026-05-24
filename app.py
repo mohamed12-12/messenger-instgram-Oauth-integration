@@ -876,6 +876,21 @@ def graph_post(path: str, params: dict = None, data: dict = None) -> dict:
     resp.raise_for_status()
     return resp.json()
 
+def graph_delete(path: str, params: dict = None) -> dict:
+    resp = requests.delete(
+        f'{GRAPH_BASE}/{path}',
+        params=params or {},
+        timeout=15
+    )
+    if resp.content:
+        data = resp.json()
+    else:
+        data = {'success': resp.ok}
+    if not resp.ok:
+        message = data.get('error', {}).get('message', 'Unknown Graph delete error')
+        raise requests.HTTPError(message, response=resp)
+    return data
+
 def format_graph_api_error(exc: Exception, default_message: str) -> tuple[str, int]:
     response = getattr(exc, 'response', None)
     if response is None:
@@ -1763,6 +1778,36 @@ def instagram_hide_comment():
     except Exception:
         logger.exception("Unexpected error while hiding Instagram comment %s", comment_id)
         return jsonify({'success': False, 'error': 'Failed to hide Instagram comment.'}), 500
+
+@app.route('/api/instagram/delete-comment', methods=['POST'])
+def instagram_delete_comment():
+    data = request.get_json(silent=True) or request.form
+    ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
+    comment_id = (data.get('comment_id') or '').strip()
+
+    if not ig_account_id:
+        return jsonify({'success': False, 'error': 'Missing Instagram account ID.'}), 400
+    if not comment_id:
+        return jsonify({'success': False, 'error': 'Comment ID is required.'}), 400
+
+    token = get_instagram_page_token(ig_account_id)
+    if not token:
+        logger.warning("Instagram delete comment failed: missing token for account %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
+
+    try:
+        result = graph_delete(
+            comment_id,
+            params={'access_token': token}
+        )
+        logger.info("Instagram comment deleted for account %s comment %s", ig_account_id, comment_id)
+        return jsonify({'success': True, 'result': result})
+    except requests.HTTPError as e:
+        error_message, status_code = format_graph_api_error(e, 'Failed to delete Instagram comment.')
+        return jsonify({'success': False, 'error': error_message}), status_code
+    except Exception:
+        logger.exception("Unexpected error while deleting Instagram comment %s", comment_id)
+        return jsonify({'success': False, 'error': 'Failed to delete Instagram comment.'}), 500
 
 @app.route('/instagram/send', methods=['POST'])
 def instagram_send():
