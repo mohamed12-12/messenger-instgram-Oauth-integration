@@ -1777,7 +1777,7 @@ def instagram_hide_comment():
             comment_id,
             params={
                 'access_token': token,
-                'hidden': 'true'
+                'hide': 'true'
             }
         )
         logger.info("Instagram comment hidden for account %s comment %s", ig_account_id, comment_id)
