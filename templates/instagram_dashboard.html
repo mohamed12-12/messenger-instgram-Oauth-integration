@@ -262,25 +262,7 @@
                         </div>
                         <button type="submit" class="btn-send" style="background: #0052ff;">Send Message Now</button>
                     </form>
-                    <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
-                        <button type="button" id="humanReplyBtn" class="btn-send" style="background:#111827; width:auto; padding:12px 18px;">Send Human Agent Reply</button>
-                        <button type="button" id="humanResolveBtn" class="btn-send" style="background:#6B7280; width:auto; padding:12px 18px;">Resolve Conversation</button>
-                    </div>
-                    <div style="background:#fff7ed; border:1px solid #fdba74; color:#9a3412; border-radius:12px; padding:14px 16px; margin-top:16px; font-size:13px;">
-                        <strong>Tag Applied On Send:</strong> <code>HUMAN_AGENT</code><br>
-                        Assigned support agent: <strong>Alex</strong>
-                    </div>
                     <div id="responseMsg" style="margin-top: 16px; font-size: 14px; font-weight: 500; text-align: center;"></div>
-                </div>
-
-                <div class="card">
-                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px;">
-                        <h2 style="font-size: 18px;">Escalated Conversations</h2>
-                        <span style="font-size: 10px; color: #9CA3AF;">Human Agent Required</span>
-                    </div>
-                    <div class="message-list" id="humanAgentList" style="min-height: 180px; border: 1px solid #F3F4F6; border-radius: 12px; padding: 12px; background: #fafafa;">
-                        <div style="text-align: center; color: #9CA3AF; padding: 40px 0;">No escalated conversations.</div>
-                    </div>
                 </div>
             </div>
 
@@ -311,34 +293,6 @@
 
     <script>
         const connectedInstagramId = {{ account_id|tojson }};
-        const humanAgentList = document.getElementById('humanAgentList');
-        const humanReplyBtn = document.getElementById('humanReplyBtn');
-        const humanResolveBtn = document.getElementById('humanResolveBtn');
-        let escalatedRecipients = new Set();
-
-        async function fetchHumanAgentEscalations() {
-            try {
-                const res = await fetch(`/api/human-agent/escalations?platform=instagram&page_id=${encodeURIComponent(connectedInstagramId || '')}`);
-                const data = await res.json();
-                const conversations = data.conversations || [];
-                escalatedRecipients = new Set(conversations.map(item => String(item.sender_id)));
-
-                if (conversations.length === 0) {
-                    humanAgentList.innerHTML = '<div style="text-align: center; color: #9CA3AF; padding: 40px 0;">No escalated conversations.</div>';
-                    return;
-                }
-
-                humanAgentList.innerHTML = conversations.map(item => `
-                    <div class="message-item">
-                        <div class="sender-id" style="cursor:pointer;" onclick="document.getElementById('recipient_psid').value='${item.sender_id}'">User PSID: ${item.sender_id}</div>
-                        <div class="message-text"><span style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Agent Required</span><br>Assigned: ${item.assigned_agent_name || 'Alex'}<br>Intent: ${item.last_intent || 'unknown'} (${Number(item.last_intent_confidence || 0).toFixed(2)})<br>${item.last_user_message || ''}</div>
-                        <div class="timestamp">${new Date(item.last_user_message_timestamp).toLocaleString()} | 7-day window ${item.within_human_agent_window ? 'open' : 'expired'}</div>
-                    </div>
-                `).join('');
-            } catch (err) {
-                humanAgentList.innerHTML = '<div style="text-align: center; color: #DC2626; padding: 40px 0;">Failed to load escalations.</div>';
-            }
-        }
 
         // Send Message logic
         document.getElementById('msgForm').onsubmit = async (e) => {
@@ -398,11 +352,9 @@
                     feed.innerHTML = data.map(msg => `
                         <div class="message-item">
                             <div class="sender-id">User PSID: ${msg.sender_id}</div>
-                            ${escalatedRecipients.has(String(msg.sender_id)) ? '<div style="display:inline-block;background:#FEE2E2;color:#991B1B;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">Human Escalated</div>' : (msg.ai_status === 'ai_handled' ? '<div style="display:inline-block;background:#DCFCE7;color:#166534;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">AI Handled</div>' : '')}
-                            ${msg.message_tag === 'HUMAN_AGENT' ? '<div style="display:inline-block;background:#E0F2FE;color:#075985;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-bottom:8px;">HUMAN_AGENT tag</div>' : ''}
                             <div class="message-text">${msg.text}</div>
                             <div class="timestamp" style="font-size: 10px; color: #9CA3AF; text-align: right; margin-top: 6px;">
-                                ${new Date(msg.timestamp).toLocaleString()}${msg.intent ? ` | intent: ${msg.intent}` : ''}${msg.intent_confidence !== undefined ? ` | confidence: ${Number(msg.intent_confidence).toFixed(2)}` : ''}
+                                ${new Date(msg.timestamp).toLocaleString()}${msg.source ? ` | ${msg.source}` : ''}
                             </div>
                         </div>
                     `).join('');
@@ -413,78 +365,8 @@
             }
         }
 
-        async function sendHumanAgentReply() {
-            const recipientId = document.getElementById('recipient_psid').value.trim();
-            const message = document.getElementById('message').value.trim();
-            const statusDiv = document.getElementById('responseMsg');
-
-            if (!recipientId || !message) {
-                statusDiv.innerHTML = "Recipient PSID and message are required for Human Agent reply.";
-                statusDiv.style.color = "#DC2626";
-                return;
-            }
-
-            const res = await fetch('/api/human-agent/reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    platform: 'instagram',
-                    recipient_id: recipientId,
-                    page_id: connectedInstagramId,
-                    message
-                })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                statusDiv.innerHTML = "Human Agent reply sent successfully.";
-                statusDiv.style.color = "#059669";
-                fetchMessages();
-                return;
-            }
-
-            statusDiv.innerHTML = data.error || "Human Agent reply failed.";
-            statusDiv.style.color = "#DC2626";
-        }
-
-        async function resolveHumanAgentConversation() {
-            const recipientId = document.getElementById('recipient_psid').value.trim();
-            const statusDiv = document.getElementById('responseMsg');
-
-            if (!recipientId) {
-                statusDiv.innerHTML = "Recipient PSID is required to resolve the conversation.";
-                statusDiv.style.color = "#DC2626";
-                return;
-            }
-
-            const res = await fetch('/api/human-agent/resolve', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    platform: 'instagram',
-                    recipient_id: recipientId,
-                    page_id: connectedInstagramId
-                })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                statusDiv.innerHTML = "Conversation resolved and AI re-enabled.";
-                statusDiv.style.color = "#059669";
-                fetchHumanAgentEscalations();
-                fetchMessages();
-                return;
-            }
-
-            statusDiv.innerHTML = data.error || "Resolve failed.";
-            statusDiv.style.color = "#DC2626";
-        }
-
         // Initialize autoupdate
         setInterval(fetchMessages, 3000); 
-        setInterval(fetchHumanAgentEscalations, 5000);
-        humanReplyBtn.onclick = sendHumanAgentReply;
-        humanResolveBtn.onclick = resolveHumanAgentConversation;
         // Diagnostic logic
         async function checkConnection() {
             try {
@@ -513,8 +395,6 @@
                 alert("❌ Network Error during diagnostic.");
             }
         }
-
-        fetchHumanAgentEscalations();
     </script>
 </body>
 </html>
