@@ -39,6 +39,11 @@ SECRET_KEY      = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123')
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
 INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
 
+# WhatsApp-specific configuration
+WHATSAPP_REDIRECT_URI = os.getenv('WHATSAPP_REDIRECT_URI')
+WHATSAPP_VERIFY_TOKEN = os.getenv('WHATSAPP_VERIFY_TOKEN', 'nanovate_whatsapp_verify_2026')
+WHATSAPP_SCOPES = 'business_management,whatsapp_business_management,whatsapp_business_messaging'
+
 # Flask app initialization
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -63,6 +68,8 @@ CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 TOKEN_FILE = os.path.join(BASE_DIR, 'page_tokens.json')
 LEGACY_INSTAGRAM_MESSAGES_FILE = os.path.join(BASE_DIR, 'instagram_messages.json')
 WEBHOOK_DEBUG_FILE = os.path.join(BASE_DIR, 'webhook_debug.json')
+WHATSAPP_CONNECTION_FILE = os.path.join(BASE_DIR, 'whatsapp_connection.json')
+WHATSAPP_WEBHOOK_DEBUG_FILE = os.path.join(BASE_DIR, 'whatsapp_webhook_debug.json')
 
 # In-memory storage for recent Instagram messages if the file does not exist
 instagram_messages = []
@@ -142,6 +149,19 @@ def load_json_list(path):
 def save_json_list(path, items):
     with open(path, 'w') as f:
         json.dump(items, f)
+
+def load_json_object(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_json_object(path, data):
+    with open(path, 'w') as f:
+        json.dump(data, f)
 
 def save_page_webhook_debug(page_id, endpoint, data, headers):
     if not page_id:
@@ -276,6 +296,22 @@ def load_instagram_messages(ig_account_id=None):
 
     return messages
 
+def save_whatsapp_connection(data):
+    save_json_object(WHATSAPP_CONNECTION_FILE, data)
+
+def load_whatsapp_connection():
+    return load_json_object(WHATSAPP_CONNECTION_FILE)
+
+def get_whatsapp_connection():
+    connection = load_whatsapp_connection()
+    if not connection:
+        return {}
+
+    session_access_token = session.get('whatsapp_access_token')
+    if session_access_token:
+        connection['access_token'] = session_access_token
+    return connection
+
 # ─── Graph API Helpers ───────────────────────────────────────────────────────
 def subscribe_page_to_webhook(page_id: str, page_access_token: str) -> bool:
     if not page_access_token:
@@ -356,6 +392,24 @@ def graph_delete(path: str, params: dict = None) -> dict:
         raise requests.HTTPError(message, response=resp)
     return data
 
+def graph_post_json(path: str, access_token: str, payload: dict) -> dict:
+    resp = requests.post(
+        f'{GRAPH_BASE}/{path}',
+        headers={'Authorization': f'Bearer {access_token}'},
+        json=payload,
+        timeout=15
+    )
+    if not resp.ok:
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {'error': {'message': resp.text or 'Unknown Graph error'}}
+        raise requests.HTTPError(
+            data.get('error', {}).get('message', 'Unknown Graph error'),
+            response=resp
+        )
+    return resp.json()
+
 def format_graph_api_error(exc: Exception, default_message: str) -> tuple[str, int]:
     response = getattr(exc, 'response', None)
     if response is None:
@@ -383,13 +437,13 @@ def format_graph_api_error(exc: Exception, default_message: str) -> tuple[str, i
     )
 
     if code == 190:
-        return 'Instagram access token is missing or expired. Please reconnect your Instagram account.', 401
+        return 'Meta access token is missing or expired. Please reconnect this integration.', 401
     if code in (10, 200):
-        return 'Missing required Instagram comments permissions. Please ensure the account was reconnected with comment management scopes approved.', 403
+        return 'Missing required Meta permissions for this action. Please reconnect the integration with the required scopes approved.', 403
     if code == 100:
-        return 'Invalid Instagram comment or media ID.', 400
+        return 'Meta rejected one of the provided IDs or parameters.', 400
     if code in (4, 17, 32, 613) or 'rate limit' in lowered or 'too many calls' in lowered:
-        return 'Instagram rate limit reached. Please try again shortly.', 429
+        return 'Meta rate limit reached. Please try again shortly.', 429
 
     return message or default_message, response.status_code or 500
 
@@ -598,6 +652,83 @@ def get_instagram_page_token(ig_account_id=None):
 
 def send_instagram_message(recipient_id: str, text: str, page_access_token: str):
     return send_graph_message(recipient_id, text, page_access_token)
+
+def get_whatsapp_redirect_uri():
+    return WHATSAPP_REDIRECT_URI or url_for('whatsapp_callback', _external=True)
+
+def get_whatsapp_businesses(user_access_token: str) -> list:
+    return graph_get_all_items('me/businesses', {
+        'fields': 'id,name',
+        'access_token': user_access_token
+    })
+
+def get_whatsapp_business_accounts(business_id: str, user_access_token: str) -> list:
+    for edge in ('owned_whatsapp_business_accounts', 'client_whatsapp_business_accounts'):
+        try:
+            accounts = graph_get_all_items(
+                f'{business_id}/{edge}',
+                {'fields': 'id,name', 'access_token': user_access_token}
+            )
+            if accounts:
+                return accounts
+        except requests.HTTPError:
+            logger.warning("Failed to fetch WhatsApp accounts from edge %s for business %s", edge, business_id)
+    return []
+
+def get_whatsapp_phone_numbers(waba_id: str, user_access_token: str) -> list:
+    return graph_get_all_items(
+        f'{waba_id}/phone_numbers',
+        {'fields': 'id,display_phone_number,verified_name', 'access_token': user_access_token}
+    )
+
+def fetch_whatsapp_connection_data(user_access_token: str) -> dict:
+    businesses = get_whatsapp_businesses(user_access_token)
+    logger.info("WhatsApp OAuth retrieved %s businesses from Meta.", len(businesses))
+
+    for business in businesses:
+        business_id = business.get('id')
+        if not business_id:
+            continue
+
+        wabas = get_whatsapp_business_accounts(business_id, user_access_token)
+        logger.info("Business %s returned %s WhatsApp Business Accounts.", business_id, len(wabas))
+
+        for waba in wabas:
+            waba_id = waba.get('id')
+            if not waba_id:
+                continue
+
+            phone_numbers = get_whatsapp_phone_numbers(waba_id, user_access_token)
+            logger.info("WABA %s returned %s phone numbers.", waba_id, len(phone_numbers))
+            if not phone_numbers:
+                continue
+
+            phone = phone_numbers[0]
+            return {
+                'business_id': business_id,
+                'waba_id': waba_id,
+                'phone_number_id': phone.get('id'),
+                'display_phone_number': phone.get('display_phone_number') or phone.get('verified_name') or 'Unknown',
+                'access_token': user_access_token,
+                'connected_at': int(time.time())
+            }
+
+    raise ValueError(
+        'No WhatsApp Business Account with an attached phone number was returned by Meta. '
+        'Make sure the user has access to the Business Manager, WABA, and phone number.'
+    )
+
+def send_whatsapp_message(phone_number_id: str, to_number: str, text: str, access_token: str) -> dict:
+    return graph_post_json(
+        f'{phone_number_id}/messages',
+        access_token=access_token,
+        payload={
+            'messaging_product': 'whatsapp',
+            'to': to_number,
+            'type': 'text',
+            'text': {'body': text}
+        }
+    )
 
 # -----------------------------------------------------------------------------
 # Flask routes
@@ -852,6 +983,154 @@ def instagram_auth_callback():
     except Exception as e:
         logger.exception("IG OAuth error")
         return render_template('instagram_index.html', error='Instagram login failed unexpectedly. Please try connecting again.'), 500
+
+# -----------------------------------------------------------------------------
+# WhatsApp routes
+# -----------------------------------------------------------------------------
+
+@app.route('/whatsapp/connect')
+def whatsapp_connect():
+    state = secrets.token_urlsafe(16)
+    session['whatsapp_oauth_state'] = state
+    redirect_uri = get_whatsapp_redirect_uri()
+    fb_url = (
+        "https://www.facebook.com/v22.0/dialog/oauth"
+        f"?client_id={META_APP_ID}"
+        f"&redirect_uri={redirect_uri}"
+        f"&state={state}"
+        f"&scope={WHATSAPP_SCOPES}"
+        "&response_type=code"
+        "&auth_type=rerequest"
+    )
+    return redirect(fb_url)
+
+@app.route('/whatsapp/callback')
+def whatsapp_callback():
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description')
+    expected_state = session.pop('whatsapp_oauth_state', None)
+
+    if not state or not expected_state or state != expected_state:
+        if load_whatsapp_connection():
+            return redirect(url_for('whatsapp_dashboard'))
+        return render_template('index.html', error='WhatsApp CSRF validation failed. Please try again.'), 400
+
+    if error:
+        return render_template('index.html', error=error_description or error), 400
+    if not code:
+        return render_template('index.html', error='Missing WhatsApp login code. Please click Connect again.'), 400
+
+    try:
+        redirect_uri = get_whatsapp_redirect_uri()
+        token_data = graph_get('oauth/access_token', {
+            'client_id': META_APP_ID,
+            'redirect_uri': redirect_uri,
+            'client_secret': META_APP_SECRET,
+            'code': code
+        })
+        user_access_token = token_data.get('access_token')
+        if not user_access_token:
+            raise ValueError('Meta did not return a WhatsApp access token.')
+
+        connection = fetch_whatsapp_connection_data(user_access_token)
+        session['whatsapp_access_token'] = user_access_token
+        save_whatsapp_connection(connection)
+        return redirect(url_for('whatsapp_dashboard'))
+    except requests.HTTPError as e:
+        logger.exception("WhatsApp auth callback token exchange failed.")
+        return render_template('index.html', error=format_oauth_exchange_error(e, 'WhatsApp')), 400
+    except ValueError as e:
+        logger.warning("WhatsApp connection setup failed: %s", e)
+        return render_template('index.html', error=str(e)), 400
+    except Exception:
+        logger.exception("WhatsApp auth callback failed.")
+        return render_template('index.html', error='WhatsApp login failed unexpectedly. Please try connecting again.'), 500
+
+@app.route('/whatsapp/dashboard')
+def whatsapp_dashboard():
+    connection = get_whatsapp_connection()
+    if not connection:
+        return redirect(url_for('index'))
+    return render_template('whatsapp_dashboard.html', connection=connection)
+
+@app.route('/whatsapp/send', methods=['POST'])
+def whatsapp_send():
+    connection = get_whatsapp_connection()
+    if not connection:
+        return jsonify({'success': False, 'error': 'No connected WhatsApp Business Account found. Please connect first.'}), 401
+
+    phone_number_id = connection.get('phone_number_id')
+    access_token = connection.get('access_token')
+    to_number = (request.form.get('to_number') or '').strip()
+    message_text = (request.form.get('message') or '').strip()
+
+    if not phone_number_id:
+        return jsonify({'success': False, 'error': 'Missing WhatsApp phone number ID in saved connection.'}), 400
+    if not access_token:
+        return jsonify({'success': False, 'error': 'Missing WhatsApp access token. Please reconnect the account.'}), 401
+    if not to_number:
+        return jsonify({'success': False, 'error': 'Recipient phone number is required.'}), 400
+    if not message_text:
+        return jsonify({'success': False, 'error': 'Message text is required.'}), 400
+
+    try:
+        result = send_whatsapp_message(phone_number_id, to_number, message_text, access_token)
+        return jsonify({'success': True, 'result': result})
+    except requests.HTTPError as e:
+        raw_error = extract_graph_api_error_payload(e)
+        logger.error(
+            "WhatsApp send Meta error phone_number_id=%s to=%s payload=%s",
+            phone_number_id,
+            to_number,
+            raw_error
+        )
+        error_message, status_code = format_graph_api_error(e, 'Failed to send WhatsApp message.')
+        return jsonify({'success': False, 'error': error_message, 'meta_error': raw_error}), status_code
+    except Exception:
+        logger.exception("Unexpected error while sending WhatsApp message.")
+        return jsonify({'success': False, 'error': 'Failed to send WhatsApp message.'}), 500
+
+@app.route('/whatsapp/webhook', methods=['GET'])
+def whatsapp_webhook_verify():
+    mode = request.args.get('hub.mode')
+    token = request.args.get('hub.verify_token')
+    challenge = request.args.get('hub.challenge')
+    if mode == 'subscribe' and token == WHATSAPP_VERIFY_TOKEN:
+        return challenge, 200
+    return "Verification failed", 403
+
+@app.route('/whatsapp/webhook', methods=['POST'])
+def whatsapp_webhook_event():
+    data = request.get_json(force=True, silent=True) or {}
+
+    signature = request.headers.get('X-Hub-Signature-256')
+    if signature and META_APP_SECRET:
+        try:
+            expected = 'sha256=' + hmac_module.new(
+                META_APP_SECRET.encode('utf-8'),
+                request.data,
+                hashlib.sha256
+            ).hexdigest()
+            if hmac_module.compare_digest(signature, expected):
+                logger.info("WhatsApp webhook signature verified.")
+            else:
+                logger.warning("WhatsApp webhook signature mismatch.")
+        except Exception as e:
+            logger.error("WhatsApp webhook HMAC verification failed: %s", e)
+
+    try:
+        save_json_object(WHATSAPP_WEBHOOK_DEBUG_FILE, {
+            'timestamp': time.time(),
+            'headers': dict(request.headers),
+            'data': data
+        })
+    except Exception as e:
+        logger.error("WhatsApp webhook debug write failed: %s", e)
+
+    logger.info("WhatsApp webhook received: object=%s", data.get('object'))
+    return "EVENT_RECEIVED", 200
 
 @app.route('/instagram/webhook', methods=['GET'])
 def instagram_webhook_verify():

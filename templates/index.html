@@ -99,7 +99,7 @@
             font-weight: 600;
             transition: background 0.2s;
             width: 100%;
-            max-width: 380px;
+            min-height: 72px;
         }
 
         .btn-facebook:hover {
@@ -110,6 +110,40 @@
             width: 28px;
             height: 28px;
         }
+
+        .connect-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+            align-items: stretch;
+        }
+
+        @media (max-width: 900px) {
+            .connect-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .btn-whatsapp {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background: #25D366;
+            color: white;
+            padding: 20px 48px;
+            border-radius: 14px;
+            text-decoration: none;
+            font-size: 20px;
+            font-weight: 600;
+            transition: background 0.2s;
+            width: 100%;
+            min-height: 72px;
+        }
+
+        .btn-whatsapp:hover {
+            background: #1fba57;
+        }
     </style>
 </head>
 <body>
@@ -117,23 +151,29 @@
         <div class="logo">nanovate.io</div>
         <div class="subtitle">Meta Integration</div>
         
-        <h1>Connect Your Messenger</h1>
-        <p>Allow Nanovate to connect your Facebook Page for OAuth, webhook events, and manual messaging from the dashboard.</p>
+        <h1>Connect Your Meta Channels</h1>
+        <p>Allow Nanovate to connect Facebook Messenger, Instagram, and WhatsApp Business using the same local OAuth and webhook demo app.</p>
 
         {% if error %}
         <div class="error">{{ error }}</div>
         {% endif %}
         
-        <a href="/connect" class="btn-facebook">
-            <svg viewBox="0 0 24 24" fill="white">
-                <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.936 1.444 5.56 3.7 7.29V22l3.37-1.86c.9.25 1.856.386 2.845.386 5.523 0 10-4.145 10-9.243S17.523 2 12 2z" />
-            </svg>
-            Connect with Facebook
-        </a>
+        <div class="connect-grid">
+            <a href="/connect" class="btn-facebook">
+                <svg viewBox="0 0 24 24" fill="white">
+                    <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.936 1.444 5.56 3.7 7.29V22l3.37-1.86c.9.25 1.856.386 2.845.386 5.523 0 10-4.145 10-9.243S17.523 2 12 2z" />
+                </svg>
+                Connect with Facebook
+            </a>
 
-        <a href="/instagram/connect" class="btn-facebook" style="background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); margin-top: 16px;">
-            Connect with Instagram
-        </a>
+            <a href="/instagram/connect" class="btn-facebook" style="background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);">
+                Connect with Instagram
+            </a>
+
+            <a href="/whatsapp/connect" class="btn-whatsapp">
+                Connect with WhatsApp
+            </a>
+        </div>
     </div>
 </body>
 </html>

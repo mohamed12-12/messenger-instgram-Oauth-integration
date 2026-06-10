@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Dashboard - Nanovate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #6D68D0;
+            --panel: #ffffff;
+            --text-main: #111827;
+            --text-sub: #6B7280;
+            --whatsapp: #25D366;
+            --whatsapp-dark: #1fba57;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .shell {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            color: white;
+            margin-bottom: 28px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 800;
+        }
+
+        .status {
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 999px;
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 28px;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--panel);
+            border-radius: 24px;
+            padding: 32px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        h1, h2 {
+            color: var(--text-main);
+        }
+
+        h1 {
+            font-size: 30px;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            font-size: 20px;
+            margin-bottom: 20px;
+        }
+
+        .subtext {
+            color: var(--text-sub);
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom: 28px;
+        }
+
+        .meta-list {
+            display: grid;
+            gap: 16px;
+        }
+
+        .meta-item {
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 16px;
+            padding: 16px;
+        }
+
+        .meta-item .label {
+            color: var(--text-sub);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 8px;
+        }
+
+        .meta-item code {
+            display: block;
+            color: var(--text-main);
+            font-size: 14px;
+            word-break: break-word;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-main);
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        input, textarea {
+            width: 100%;
+            border: 1px solid #D1D5DB;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-family: inherit;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 140px;
+        }
+
+        .btn {
+            width: 100%;
+            border: 0;
+            border-radius: 12px;
+            background: var(--whatsapp);
+            color: white;
+            padding: 16px 18px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            background: var(--whatsapp-dark);
+        }
+
+        .result {
+            display: none;
+            margin-top: 18px;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .result.ok {
+            display: block;
+            background: #DCFCE7;
+            color: #166534;
+            border: 1px solid #BBF7D0;
+        }
+
+        .result.err {
+            display: block;
+            background: #FEE2E2;
+            color: #991B1B;
+            border: 1px solid #FECACA;
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="topbar">
+            <div class="logo">nanovate.io</div>
+            <div class="status">WhatsApp connected</div>
+        </div>
+
+        <div class="grid">
+            <section class="card">
+                <h1>WhatsApp Business Dashboard</h1>
+                <p class="subtext">This connection is stored locally for demo and App Review testing. Use the form to send a direct text message through the connected phone number.</p>
+
+                <div class="meta-list">
+                    <div class="meta-item">
+                        <div class="label">Business ID</div>
+                        <code>{{ connection.business_id }}</code>
+                    </div>
+                    <div class="meta-item">
+                        <div class="label">WABA ID</div>
+                        <code>{{ connection.waba_id }}</code>
+                    </div>
+                    <div class="meta-item">
+                        <div class="label">Phone Number ID</div>
+                        <code>{{ connection.phone_number_id }}</code>
+                    </div>
+                    <div class="meta-item">
+                        <div class="label">Display Phone Number</div>
+                        <code>{{ connection.display_phone_number }}</code>
+                    </div>
+                    <div class="meta-item">
+                        <div class="label">Connected At</div>
+                        <code>{{ connection.connected_at }}</code>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Send Test Message</h2>
+                <form id="whatsappSendForm">
+                    <div class="form-group">
+                        <label for="to_number">Recipient Phone Number</label>
+                        <input id="to_number" name="to_number" type="text" placeholder="201234567890" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="message">Message</label>
+                        <textarea id="message" name="message" placeholder="Type a short WhatsApp test message..." required></textarea>
+                    </div>
+
+                    <button type="submit" class="btn" id="sendBtn">Send WhatsApp Message</button>
+                </form>
+
+                <div id="resultBox" class="result"></div>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('whatsappSendForm');
+        const button = document.getElementById('sendBtn');
+        const resultBox = document.getElementById('resultBox');
+
+        function renderResult(ok, message) {
+            resultBox.className = `result ${ok ? 'ok' : 'err'}`;
+            resultBox.innerHTML = message;
+        }
+
+        form.onsubmit = async (event) => {
+            event.preventDefault();
+            button.disabled = true;
+            button.textContent = 'Sending...';
+
+            try {
+                const response = await fetch('/whatsapp/send', {
+                    method: 'POST',
+                    body: new FormData(form)
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    const messageId = data.result?.messages?.[0]?.id || 'Sent';
+                    renderResult(true, `<strong>Success:</strong> ${messageId}`);
+                } else {
+                    const metaMessage = data.meta_error?.error?.message;
+                    renderResult(false, `<strong>Error:</strong> ${metaMessage || data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                renderResult(false, `<strong>Error:</strong> ${error.message}`);
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Send WhatsApp Message';
+            }
+        };
+    </script>
+</body>
+</html>
