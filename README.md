@@ -105,6 +105,8 @@ These are the app-critical values:
 - `INSTAGRAM_REDIRECT_URI`
 - `WHATSAPP_REDIRECT_URI`
 - `WHATSAPP_VERIFY_TOKEN`
+- `WHATSAPP_APP_ID`
+- `WHATSAPP_APP_SECRET`
 
 These are documented reference URLs for deployment and Meta setup:
 
@@ -116,7 +118,7 @@ These are documented reference URLs for deployment and Meta setup:
 - `INSTAGRAM_COMMENTS_URL`
 
 Important note:
-The current code directly reads `META_APP_ID`, `META_APP_SECRET`, `FLASK_SECRET_KEY`, `VERIFY_TOKEN`, `REDIRECT_URI`, `INSTAGRAM_REDIRECT_URI`, `WHATSAPP_REDIRECT_URI`, and `WHATSAPP_VERIFY_TOKEN`.
+The current code directly reads `META_APP_ID`, `META_APP_SECRET`, `FLASK_SECRET_KEY`, `VERIFY_TOKEN`, `REDIRECT_URI`, `INSTAGRAM_REDIRECT_URI`, `WHATSAPP_APP_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_REDIRECT_URI`, and `WHATSAPP_VERIFY_TOKEN`.
 The other URL-style env vars are documentation-friendly deployment references for your team.
 
 ## Main User Flows
@@ -179,6 +181,8 @@ These files should not be committed.
 
 Add these environment variables to `.env`:
 
+- `WHATSAPP_APP_ID=your-whatsapp-meta-app-id`
+- `WHATSAPP_APP_SECRET=your-whatsapp-meta-app-secret`
 - `WHATSAPP_REDIRECT_URI=https://your-domain.com/whatsapp/callback`
 - `WHATSAPP_VERIFY_TOKEN=your-demo-verify-token`
 
@@ -188,7 +192,8 @@ In the Meta App dashboard:
 2. Add `https://your-domain.com/whatsapp/callback` as a valid OAuth redirect URI.
 3. Configure `https://your-domain.com/whatsapp/webhook` as the WhatsApp webhook callback URL.
 4. Use the same `WHATSAPP_VERIFY_TOKEN` value during webhook verification.
-5. Make sure the test user has access to the Business Manager, WhatsApp Business Account, and phone number.
+5. If Messenger and Instagram use a different Meta app, set `WHATSAPP_APP_ID` and `WHATSAPP_APP_SECRET` to the dedicated WhatsApp app credentials.
+6. Make sure the test user has access to the Business Manager, WhatsApp Business Account, and phone number.
 
 For demo testing:
 

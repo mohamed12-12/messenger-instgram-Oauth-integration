@@ -40,6 +40,8 @@ INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
 INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
 
 # WhatsApp-specific configuration
+WHATSAPP_APP_ID = os.getenv('WHATSAPP_APP_ID')
+WHATSAPP_APP_SECRET = os.getenv('WHATSAPP_APP_SECRET')
 WHATSAPP_REDIRECT_URI = os.getenv('WHATSAPP_REDIRECT_URI')
 WHATSAPP_VERIFY_TOKEN = os.getenv('WHATSAPP_VERIFY_TOKEN', 'nanovate_whatsapp_verify_2026')
 WHATSAPP_SCOPES = 'business_management,whatsapp_business_management,whatsapp_business_messaging'
@@ -653,6 +655,12 @@ def get_instagram_page_token(ig_account_id=None):
 def send_instagram_message(recipient_id: str, text: str, page_access_token: str):
     return send_graph_message(recipient_id, text, page_access_token)
 
+def get_whatsapp_app_id():
+    return WHATSAPP_APP_ID or META_APP_ID
+
+def get_whatsapp_app_secret():
+    return WHATSAPP_APP_SECRET or META_APP_SECRET
+
 def get_whatsapp_redirect_uri():
     return WHATSAPP_REDIRECT_URI or url_for('whatsapp_callback', _external=True)
 
@@ -993,9 +1001,12 @@ def whatsapp_connect():
     state = secrets.token_urlsafe(16)
     session['whatsapp_oauth_state'] = state
     redirect_uri = get_whatsapp_redirect_uri()
+    whatsapp_app_id = get_whatsapp_app_id()
+    if not whatsapp_app_id:
+        return render_template('index.html', error='WhatsApp app ID is missing. Set WHATSAPP_APP_ID or META_APP_ID.'), 500
     fb_url = (
         "https://www.facebook.com/v22.0/dialog/oauth"
-        f"?client_id={META_APP_ID}"
+        f"?client_id={whatsapp_app_id}"
         f"&redirect_uri={redirect_uri}"
         f"&state={state}"
         f"&scope={WHATSAPP_SCOPES}"
@@ -1024,10 +1035,14 @@ def whatsapp_callback():
 
     try:
         redirect_uri = get_whatsapp_redirect_uri()
+        whatsapp_app_id = get_whatsapp_app_id()
+        whatsapp_app_secret = get_whatsapp_app_secret()
+        if not whatsapp_app_id or not whatsapp_app_secret:
+            raise ValueError('WhatsApp app credentials are missing. Set WHATSAPP_APP_ID and WHATSAPP_APP_SECRET for a separate WhatsApp app.')
         token_data = graph_get('oauth/access_token', {
-            'client_id': META_APP_ID,
+            'client_id': whatsapp_app_id,
             'redirect_uri': redirect_uri,
-            'client_secret': META_APP_SECRET,
+            'client_secret': whatsapp_app_secret,
             'code': code
         })
         user_access_token = token_data.get('access_token')
@@ -1106,10 +1121,11 @@ def whatsapp_webhook_event():
     data = request.get_json(force=True, silent=True) or {}
 
     signature = request.headers.get('X-Hub-Signature-256')
-    if signature and META_APP_SECRET:
+    whatsapp_app_secret = get_whatsapp_app_secret()
+    if signature and whatsapp_app_secret:
         try:
             expected = 'sha256=' + hmac_module.new(
-                META_APP_SECRET.encode('utf-8'),
+                whatsapp_app_secret.encode('utf-8'),
                 request.data,
                 hashlib.sha256
             ).hexdigest()
