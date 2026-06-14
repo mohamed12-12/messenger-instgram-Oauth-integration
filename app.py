@@ -308,10 +308,6 @@ def get_whatsapp_connection():
     connection = load_whatsapp_connection()
     if not connection:
         return {}
-
-    session_access_token = session.get('whatsapp_access_token')
-    if session_access_token:
-        connection['access_token'] = session_access_token
     return connection
 
 # ─── Graph API Helpers ───────────────────────────────────────────────────────
@@ -733,8 +729,11 @@ def send_whatsapp_message(phone_number_id: str, to_number: str, text: str, acces
         payload={
             'messaging_product': 'whatsapp',
             'to': to_number,
-            'type': 'text',
-            'text': {'body': text}
+            'type': 'template',
+            'template': {
+                'name': 'hello_world',
+                'language': {'code': 'en_US'}
+            }
         }
     )
 
