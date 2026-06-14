@@ -305,10 +305,7 @@ def load_whatsapp_connection():
     return load_json_object(WHATSAPP_CONNECTION_FILE)
 
 def get_whatsapp_connection():
-    connection = load_whatsapp_connection()
-    if not connection:
-        return {}
-    return connection
+    return load_whatsapp_connection()
 
 # ─── Graph API Helpers ───────────────────────────────────────────────────────
 def subscribe_page_to_webhook(page_id: str, page_access_token: str) -> bool:
