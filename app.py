@@ -72,6 +72,7 @@ LEGACY_INSTAGRAM_MESSAGES_FILE = os.path.join(BASE_DIR, 'instagram_messages.json
 WEBHOOK_DEBUG_FILE = os.path.join(BASE_DIR, 'webhook_debug.json')
 WHATSAPP_CONNECTION_FILE = os.path.join(BASE_DIR, 'whatsapp_connection.json')
 WHATSAPP_WEBHOOK_DEBUG_FILE = os.path.join(BASE_DIR, 'whatsapp_webhook_debug.json')
+WHATSAPP_MESSAGES_FILE = os.path.join(BASE_DIR, 'whatsapp_messages.json')
 
 # In-memory storage for recent Instagram messages if the file does not exist
 instagram_messages = []
@@ -306,6 +307,66 @@ def load_whatsapp_connection():
 
 def get_whatsapp_connection():
     return load_whatsapp_connection()
+
+def normalize_whatsapp_timestamp(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(time.time())
+
+def load_whatsapp_messages(limit=25):
+    messages = load_json_list(WHATSAPP_MESSAGES_FILE)
+    messages.sort(key=lambda msg: normalize_whatsapp_timestamp(msg.get('timestamp')), reverse=True)
+    return messages[:limit]
+
+def save_whatsapp_inbound_message(msg):
+    messages = load_json_list(WHATSAPP_MESSAGES_FILE)
+    raw_webhook_id = msg.get('raw_webhook_id')
+    if raw_webhook_id and any(item.get('raw_webhook_id') == raw_webhook_id for item in messages):
+        logger.info("WhatsApp inbound message already saved: raw_webhook_id=%s", raw_webhook_id)
+        return False
+
+    messages.insert(0, msg)
+    messages = messages[:50]
+    save_json_list(WHATSAPP_MESSAGES_FILE, messages)
+    logger.info(
+        "WhatsApp inbound message saved: raw_webhook_id=%s wa_id=%s",
+        raw_webhook_id,
+        msg.get('wa_id')
+    )
+    return True
+
+def extract_whatsapp_inbound_messages(data):
+    inbound_messages = []
+    for entry in data.get('entry', []) or []:
+        for change in entry.get('changes', []) or []:
+            value = change.get('value') or {}
+            contacts = {}
+            for contact in value.get('contacts', []) or []:
+                wa_id = contact.get('wa_id')
+                if wa_id:
+                    contacts[wa_id] = contact
+
+            for message in value.get('messages', []) or []:
+                sender_phone_number = message.get('from') or ''
+                contact = contacts.get(sender_phone_number) or {}
+                sender_name = ((contact.get('profile') or {}).get('name') or '')
+                message_type = message.get('type') or ''
+                text_body = ''
+                if message_type == 'text':
+                    text_body = ((message.get('text') or {}).get('body') or '')
+
+                inbound_messages.append({
+                    'timestamp': normalize_whatsapp_timestamp(message.get('timestamp')),
+                    'wa_id': contact.get('wa_id') or sender_phone_number,
+                    'sender_phone_number': sender_phone_number,
+                    'sender_name': sender_name,
+                    'message_type': message_type,
+                    'text_body': text_body,
+                    'raw_webhook_id': message.get('id') or ''
+                })
+
+    return inbound_messages
 
 # ─── Graph API Helpers ───────────────────────────────────────────────────────
 def subscribe_page_to_webhook(page_id: str, page_access_token: str) -> bool:
@@ -1064,7 +1125,8 @@ def whatsapp_dashboard():
     connection = get_whatsapp_connection()
     if not connection:
         return redirect(url_for('index'))
-    return render_template('whatsapp_dashboard.html', connection=connection)
+    messages = load_whatsapp_messages()
+    return render_template('whatsapp_dashboard.html', connection=connection, messages=messages)
 
 @app.route('/whatsapp/send', methods=['POST'])
 def whatsapp_send():
@@ -1142,6 +1204,18 @@ def whatsapp_webhook_event():
         logger.error("WhatsApp webhook debug write failed: %s", e)
 
     logger.info("WhatsApp webhook received: object=%s", data.get('object'))
+    inbound_messages = extract_whatsapp_inbound_messages(data)
+    if inbound_messages:
+        logger.info("WhatsApp inbound messages received: count=%s", len(inbound_messages))
+        for msg in inbound_messages:
+            logger.info(
+                "WhatsApp inbound message received: raw_webhook_id=%s from=%s type=%s",
+                msg.get('raw_webhook_id'),
+                msg.get('sender_phone_number'),
+                msg.get('message_type')
+            )
+            save_whatsapp_inbound_message(msg)
+
     return "EVENT_RECEIVED", 200
 
 @app.route('/instagram/webhook', methods=['GET'])

@@ -59,6 +59,7 @@
             display: grid;
             grid-template-columns: 1.1fr 0.9fr;
             gap: 28px;
+            margin-bottom: 28px;
         }
 
         @media (max-width: 900px) {
@@ -187,6 +188,72 @@
             color: #991B1B;
             border: 1px solid #FECACA;
         }
+
+        .messages-card {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .messages-header {
+            padding: 28px 32px 18px;
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        .messages-header h2 {
+            margin-bottom: 6px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 760px;
+        }
+
+        th, td {
+            padding: 16px 20px;
+            border-bottom: 1px solid #E5E7EB;
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+
+        th {
+            background: #F9FAFB;
+            color: var(--text-sub);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        td {
+            color: var(--text-main);
+        }
+
+        .sender-name {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .sender-phone,
+        .muted {
+            color: var(--text-sub);
+        }
+
+        .message-body {
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .empty-state {
+            padding: 28px 32px;
+            color: var(--text-sub);
+            font-size: 15px;
+        }
     </style>
 </head>
 <body>
@@ -244,6 +311,51 @@
                 <div id="resultBox" class="result"></div>
             </section>
         </div>
+
+        <section class="card messages-card">
+            <div class="messages-header">
+                <h2>Recent WhatsApp Messages</h2>
+                <p class="subtext">Inbound messages saved from the Meta WhatsApp webhook.</p>
+            </div>
+
+            {% if messages %}
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Sender</th>
+                                <th>WhatsApp ID</th>
+                                <th>Message Text</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for message in messages %}
+                                <tr>
+                                    <td class="message-time" data-timestamp="{{ message.timestamp }}">{{ message.timestamp }}</td>
+                                    <td>
+                                        {% if message.sender_name %}
+                                            <div class="sender-name">{{ message.sender_name }}</div>
+                                        {% endif %}
+                                        <div class="sender-phone">{{ message.sender_phone_number }}</div>
+                                    </td>
+                                    <td><code>{{ message.wa_id }}</code></td>
+                                    <td>
+                                        {% if message.text_body %}
+                                            <div class="message-body">{{ message.text_body }}</div>
+                                        {% else %}
+                                            <span class="muted">{{ message.message_type }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="empty-state">No inbound WhatsApp messages received yet.</div>
+            {% endif %}
+        </section>
     </div>
 
     <script>
@@ -282,6 +394,12 @@
                 button.textContent = 'Send WhatsApp Message';
             }
         };
+
+        document.querySelectorAll('.message-time[data-timestamp]').forEach((element) => {
+            const timestamp = Number(element.dataset.timestamp || 0);
+            if (!timestamp) return;
+            element.textContent = new Date(timestamp * 1000).toLocaleString();
+        });
     </script>
 </body>
 </html>
