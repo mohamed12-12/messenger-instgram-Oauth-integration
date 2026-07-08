@@ -48,6 +48,23 @@
             text-align: left;
         }
 
+        .business-context {
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            border-radius: 12px;
+            color: #3730a3;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 24px;
+            padding: 14px 16px;
+            text-align: left;
+        }
+
+        .business-context code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+        }
+
         .page-list { display: flex; flex-direction: column; gap: 16px; }
 
         .page-item {
@@ -87,6 +104,13 @@
 
         {% if error %}
         <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if business %}
+        <div class="business-context">
+            Business Portfolio: <strong>{{ business.name }}</strong><br>
+            <code>{{ business.id }}</code>
+        </div>
         {% endif %}
 
         <div class="page-list">

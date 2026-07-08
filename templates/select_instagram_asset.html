@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Instagram Asset - Nanovate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #6D68D0;
+            --text-main: #111827;
+            --text-sub: #6B7280;
+            --primary: #E1306C;
+            --border: #e5e7eb;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 24px;
+            padding: 52px 40px;
+            width: 100%;
+            max-width: 760px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        .eyebrow {
+            color: var(--primary);
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+        }
+
+        h1 { font-size: 30px; margin-bottom: 10px; color: var(--text-main); }
+        .desc { color: var(--text-sub); margin-bottom: 32px; font-size: 16px; line-height: 1.5; }
+
+        .error {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 12px;
+            color: #991b1b;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 24px;
+            padding: 14px 16px;
+        }
+
+        .asset-list { display: flex; flex-direction: column; gap: 14px; }
+
+        .asset-item {
+            background: #f9fafb;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            text-decoration: none;
+            color: inherit;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        a.asset-item:hover { border-color: var(--primary); background: #f3f4f6; }
+        .asset-item.disabled { opacity: 0.74; }
+
+        .asset-info { display: flex; align-items: center; gap: 16px; text-align: left; min-width: 0; }
+
+        .asset-avatar {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(45deg, #f09433, #dc2743, #bc1888);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            flex: 0 0 auto;
+        }
+
+        .asset-name { font-weight: 700; font-size: 17px; margin-bottom: 4px; word-break: break-word; }
+        .asset-meta { font-size: 12px; color: var(--text-sub); line-height: 1.5; }
+        .asset-meta code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .select-icon { color: var(--primary); width: 24px; height: 24px; flex: 0 0 auto; }
+        .disabled-label { color: #991b1b; font-size: 13px; font-weight: 600; max-width: 220px; text-align: right; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <div class="eyebrow">{{ business.name if business else 'Business Portfolio' }}</div>
+        <h1>Choose the Instagram Asset</h1>
+        <p class="desc">
+            Select the Instagram Business account Nanovate should connect from the assets returned for this Business Portfolio.
+        </p>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+
+        <div class="asset-list">
+            {% for asset in assets %}
+                {% if asset.connectable %}
+                <a href="/instagram/connect-page/{{ asset.page_id }}" class="asset-item" id="instagram-asset-{{ asset.instagram_id }}">
+                    <div class="asset-info">
+                        <div class="asset-avatar">{{ asset.username[0] | upper }}</div>
+                        <div>
+                            <div class="asset-name">@{{ asset.username }}</div>
+                            <div class="asset-meta">
+                                Page: {{ asset.page_name }}<br>
+                                Instagram ID: <code>{{ asset.instagram_id }}</code> | Page ID: <code>{{ asset.page_id }}</code>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="select-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </div>
+                </a>
+                {% else %}
+                <div class="asset-item disabled" id="page-{{ asset.page_id }}">
+                    <div class="asset-info">
+                        <div class="asset-avatar">{{ asset.page_name[0] | upper }}</div>
+                        <div>
+                            <div class="asset-name">{{ asset.page_name }}</div>
+                            <div class="asset-meta">Page ID: <code>{{ asset.page_id }}</code></div>
+                        </div>
+                    </div>
+                    <div class="disabled-label">{{ asset.reason }}</div>
+                </div>
+                {% endif %}
+            {% else %}
+            <div class="asset-item disabled">
+                <div class="asset-info">
+                    <div class="asset-avatar">N</div>
+                    <div>
+                        <div class="asset-name">No assets returned</div>
+                        <div class="asset-meta">This Business Portfolio did not return owned Pages.</div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </main>
+</body>
+</html>

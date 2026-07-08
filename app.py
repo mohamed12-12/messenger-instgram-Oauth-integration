@@ -37,7 +37,7 @@ SECRET_KEY      = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123')
 
 # Instagram-specific configuration
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
-INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata'
+INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata,business_management'
 
 # WhatsApp-specific configuration
 WHATSAPP_APP_ID = os.getenv('WHATSAPP_APP_ID')
@@ -59,7 +59,12 @@ GRAPH_VERSION = 'v22.0'
 GRAPH_BASE    = f'https://graph.facebook.com/{GRAPH_VERSION}'
 
 # OAuth scopes required by the app
-SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_show_list'
+SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_show_list,business_management'
+NO_BUSINESS_PORTFOLIO_MESSAGE = (
+    'No Business Portfolio was returned by Meta for this user. '
+    'Please set up a Business Manager / Business Portfolio first, make sure you are an admin, '
+    'then reconnect Nanovate and approve the business_management permission.'
+)
 
 # -----------------------------------------------------------------------------
 # Persistent storage paths
@@ -694,6 +699,126 @@ def graph_get_all_items(path: str, params: dict) -> list:
 def get_user_pages(user_access_token: str) -> list:
     return graph_get_all_items('me/accounts', {'access_token': user_access_token})
 
+def get_user_businesses(user_access_token: str) -> list:
+    return graph_get_all_items('me/businesses', {
+        'fields': 'id,name',
+        'access_token': user_access_token
+    })
+
+def get_business_owned_pages(business_id: str, user_access_token: str) -> list:
+    return graph_get_all_items(f'{business_id}/owned_pages', {
+        'fields': 'id,name,access_token',
+        'access_token': user_access_token
+    })
+
+def build_business_options(businesses: list) -> list:
+    return [
+        {'id': business.get('id'), 'name': business.get('name') or f"Business {business.get('id')}"}
+        for business in businesses
+        if business.get('id')
+    ]
+
+def build_page_options(pages: list) -> list:
+    return [
+        {
+            'id': page.get('id'),
+            'name': page.get('name') or f"Page {page.get('id')}",
+            'access_token': page.get('access_token')
+        }
+        for page in pages
+        if page.get('id')
+    ]
+
+def get_selected_business_context():
+    return session.get('selected_business_id'), session.get('selected_business_name')
+
+def find_business_or_none(user_access_token: str, business_id: str):
+    businesses = get_user_businesses(user_access_token)
+    return next((business for business in businesses if business.get('id') == business_id), None)
+
+def get_page_assets_for_selected_business(user_access_token: str) -> list:
+    business_id, _ = get_selected_business_context()
+    if not business_id:
+        return get_user_pages(user_access_token)
+
+    business_pages = get_business_owned_pages(business_id, user_access_token)
+
+    # Some owned_pages responses omit page access tokens. Merge with /me/accounts
+    # so the selected asset can still be subscribed and used for messaging.
+    pages_with_tokens = {
+        page.get('id'): page
+        for page in get_user_pages(user_access_token)
+        if page.get('id')
+    }
+    for page in business_pages:
+        token = page.get('access_token')
+        if not token and page.get('id') in pages_with_tokens:
+            page['access_token'] = pages_with_tokens[page.get('id')].get('access_token')
+    return business_pages
+
+def build_instagram_asset_options(pages: list) -> list:
+    assets = []
+    for page in pages:
+        page_id = page.get('id')
+        page_name = page.get('name') or f"Page {page_id}"
+        page_token = page.get('access_token')
+        asset = {
+            'page_id': page_id,
+            'page_name': page_name,
+            'instagram_id': None,
+            'username': None,
+            'connectable': False,
+            'reason': None
+        }
+
+        if not page_id:
+            continue
+        if not page_token:
+            asset['reason'] = 'Meta did not return a Page access token for this asset.'
+            assets.append(asset)
+            continue
+
+        try:
+            page_info = graph_get(page_id, {
+                'fields': 'instagram_business_account,name',
+                'access_token': page_token
+            })
+            ig_account = page_info.get('instagram_business_account')
+            if not ig_account:
+                asset['reason'] = 'No Instagram Business account is linked to this Page.'
+                assets.append(asset)
+                continue
+
+            ig_id = ig_account.get('id')
+            ig_info = graph_get(ig_id, {'fields': 'username', 'access_token': page_token})
+            asset.update({
+                'instagram_id': ig_id,
+                'username': ig_info.get('username') or ig_id,
+                'connectable': bool(ig_id)
+            })
+        except requests.HTTPError as exc:
+            logger.warning("Could not inspect Instagram asset for page %s: %s", page_id, exc)
+            asset['reason'] = 'Meta rejected the Instagram asset lookup for this Page.'
+        except Exception as exc:
+            logger.warning("Could not inspect Instagram asset for page %s: %s", page_id, exc)
+            asset['reason'] = 'This Page could not be inspected for a linked Instagram account.'
+
+        assets.append(asset)
+    return assets
+
+def get_business_selection_template(flow: str, businesses: list, error: str = None, status_code: int = 200):
+    business_options = build_business_options(businesses)
+    return render_template(
+        'select_business.html',
+        flow=flow,
+        businesses=business_options,
+        error=error,
+        no_businesses=not business_options,
+        messenger_scopes=SCOPES,
+        instagram_scopes=INSTAGRAM_SCOPES,
+        graph_version=GRAPH_VERSION
+    ), status_code
+
 def get_connected_page_token(page_id=None):
     page_id = page_id or session.get('connected_page_id')
     if page_id and session.get('connected_page_id') == page_id and session.get('page_access_token'):
@@ -803,10 +928,34 @@ def send_whatsapp_message(phone_number_id: str, to_number: str, text: str, acces
 def index():
     return render_template('index.html')
 
+@app.route('/api/meta-oauth-debug')
+def meta_oauth_debug():
+    business_id, business_name = get_selected_business_context()
+    return jsonify({
+        'graph_version': GRAPH_VERSION,
+        'messenger_scopes': SCOPES.split(','),
+        'instagram_scopes': INSTAGRAM_SCOPES.split(','),
+        'messenger_business_management_requested': 'business_management' in SCOPES.split(','),
+        'instagram_business_management_requested': 'business_management' in INSTAGRAM_SCOPES.split(','),
+        'selected_business_id': business_id,
+        'selected_business_name': business_name,
+        'has_user_access_token_in_session': bool(session.get('user_access_token')),
+        'expected_consent': 'Meta should show a Business Portfolio selection screen before the Page selection screen when the test user has Business access.'
+    })
+
 @app.route('/connect')
 def connect():
     state = secrets.token_urlsafe(16)
     session['oauth_state'] = state
+    session.pop('selected_business_id', None)
+    session.pop('selected_business_name', None)
+    logger.info(
+        "Messenger OAuth start. graph_version=%s requested_scopes=%s business_management_requested=%s redirect_uri=%s",
+        GRAPH_VERSION,
+        SCOPES,
+        'business_management' in SCOPES.split(','),
+        REDIRECT_URI
+    )
     fb_url = (
         "https://www.facebook.com/v22.0/dialog/oauth"
         f"?client_id={META_APP_ID}"
@@ -843,46 +992,95 @@ def auth_callback():
             'code':          code
         })
         session['user_access_token'] = token_data.get('access_token')
-        pages = get_user_pages(session['user_access_token'])
-        logger.info("Messenger OAuth retrieved %s pages from Meta.", len(pages))
+        if not session['user_access_token']:
+            raise ValueError('Meta did not return a Facebook access token. Please reconnect and try again.')
+        businesses = get_user_businesses(session['user_access_token'])
+        logger.info(
+            "Messenger OAuth retrieved %s businesses from Meta after requesting business_management. business_ids=%s",
+            len(businesses),
+            [business.get('id') for business in businesses if business.get('id')]
+        )
+        if not businesses:
+            return get_business_selection_template(
+                'messenger',
+                [],
+                error=NO_BUSINESS_PORTFOLIO_MESSAGE,
+                status_code=400
+            )
 
-        page_options = [
-            {'id': page.get('id'), 'name': page.get('name')}
-            for page in pages
-            if page.get('id') and page.get('name')
-        ]
+        return get_business_selection_template('messenger', businesses)
+    except requests.HTTPError as e:
+        logger.exception("Messenger auth callback token exchange failed.")
+        return render_template('index.html', error=format_oauth_exchange_error(e, 'Facebook')), 400
+    except ValueError as e:
+        logger.warning("Messenger auth callback validation failed: %s", e)
+        return render_template('index.html', error=str(e)), 400
+    except Exception as e:
+        logger.exception("Messenger auth callback failed.")
+        return render_template('index.html', error='Facebook login failed unexpectedly. Please try connecting again.'), 500
+
+@app.route('/select-business/<business_id>')
+def select_business(business_id):
+    user_token = session.get('user_access_token')
+    if not user_token:
+        return redirect('/')
+
+    try:
+        business = find_business_or_none(user_token, business_id)
+        if not business:
+            businesses = get_user_businesses(user_token)
+            return get_business_selection_template(
+                'messenger',
+                businesses,
+                error='The selected Business Portfolio was not returned by Meta. Reconnect and select the Business again.',
+                status_code=400
+            )
+
+        session['selected_business_id'] = business.get('id')
+        session['selected_business_name'] = business.get('name') or f"Business {business_id}"
+        pages = get_page_assets_for_selected_business(user_token)
+        page_options = build_page_options(pages)
+        logger.info(
+            "Messenger selected business %s returned %s owned page assets.",
+            business_id,
+            len(page_options)
+        )
         if not page_options:
             return render_template(
                 'select_page.html',
                 pages=[],
-                error='No Facebook Pages were returned. Reconnect and make sure the required Pages are selected in the Facebook dialog.'
+                business=business,
+                error='No owned Facebook Pages were returned for this Business Portfolio. Add a Page to Business Manager or select a different Business.'
             ), 400
 
-        return render_template('select_page.html', pages=page_options)
+        return render_template('select_page.html', pages=page_options, business=business)
     except requests.HTTPError as e:
-        logger.exception("Messenger auth callback token exchange failed.")
-        return render_template('index.html', error=format_oauth_exchange_error(e, 'Facebook')), 400
-    except Exception as e:
-        logger.exception("Messenger auth callback failed.")
-        return render_template('index.html', error='Facebook login failed unexpectedly. Please try connecting again.'), 500
+        logger.exception("Fetching Messenger business assets failed.")
+        return get_business_selection_template(
+            'messenger',
+            get_user_businesses(user_token),
+            error=format_oauth_exchange_error(e, 'Facebook'),
+            status_code=400
+        )
+    except Exception:
+        logger.exception("Selecting Messenger business %s failed.", business_id)
+        return render_template('index.html', error='Could not load assets for that Business Portfolio. Please reconnect and try again.'), 500
 
 @app.route('/connect-page/<page_id>')
 def connect_page(page_id):
     user_token = session.get('user_access_token')
     if not user_token: return redirect('/')
     try:
-        pages = get_user_pages(user_token)
+        pages = get_page_assets_for_selected_business(user_token)
         page_data = next((page for page in pages if page.get('id') == page_id), None)
-        page_options = [
-            {'id': page.get('id'), 'name': page.get('name')}
-            for page in pages
-            if page.get('id') and page.get('name')
-        ]
+        page_options = build_page_options(pages)
+        business_id, business_name = get_selected_business_context()
 
         if not page_data:
             return render_template(
                 'select_page.html',
                 pages=page_options,
+                business={'id': business_id, 'name': business_name} if business_id else None,
                 error='The selected page was not returned by Meta. Reconnect and make sure that page is selected in the Facebook dialog.'
             ), 400
 
@@ -893,6 +1091,7 @@ def connect_page(page_id):
             return render_template(
                 'select_page.html',
                 pages=page_options,
+                business={'id': business_id, 'name': business_name} if business_id else None,
                 error=f"Meta did not return a page access token for '{page_name}'. Reconnect and verify the granted Page permissions."
             ), 502
 
@@ -904,10 +1103,17 @@ def connect_page(page_id):
             try:
                 save_page_token(page_id, page_token)
             except: pass
-            return render_template('success.html', page_id=page_id, page_name=page_name)
+            return render_template(
+                'success.html',
+                page_id=page_id,
+                page_name=page_name,
+                business_id=business_id,
+                business_name=business_name
+            )
         return render_template(
             'select_page.html',
             pages=page_options,
+            business={'id': business_id, 'name': business_name} if business_id else None,
             error=f"Meta rejected the webhook subscription for '{page_name}'. Check that this page is granted to the app, then reconnect and try again."
         ), 502
     except Exception as e:
@@ -943,6 +1149,15 @@ def dashboard(page_id=None):
 def instagram_connect():
     state = secrets.token_urlsafe(16)
     session['oauth_state'] = state
+    session.pop('selected_business_id', None)
+    session.pop('selected_business_name', None)
+    logger.info(
+        "Instagram OAuth start. graph_version=%s requested_scopes=%s business_management_requested=%s redirect_uri=%s",
+        GRAPH_VERSION,
+        INSTAGRAM_SCOPES,
+        'business_management' in INSTAGRAM_SCOPES.split(','),
+        INSTAGRAM_REDIRECT_URI
+    )
     # Added auth_type=rerequest to force the page selection dialog if they skipped it before
     fb_url = (
         "https://www.facebook.com/v22.0/dialog/oauth"
@@ -980,74 +1195,167 @@ def instagram_auth_callback():
             'code':          code
         })
         user_access_token = token_data.get('access_token')
+        if not user_access_token:
+            raise ValueError('Meta did not return an Instagram access token. Please reconnect and try again.')
         session['user_access_token'] = user_access_token
-        
-        # 2. Get Facebook Pages
-        pages_data = graph_get('me/accounts', {'access_token': user_access_token})
-        
-        # Log the full response for debugging (sanitize in production)
-        logger.info(f"Pages data response: {json.dumps(pages_data)}")
-        
-        page_list_count = len(pages_data.get('data', []))
-        logger.info(f"Retrieved {page_list_count} pages for user.")
-        
-        # We need to find if any page has an instagram_business_account
-        instagram_account = None
-        target_page_id = None
-        target_page_token = None
-        
-        for page in pages_data.get('data', []):
-            p_id = page.get('id')
-            p_name = page.get('name')
-            p_token = page.get('access_token')
-            
-            logger.info(f"Checking Page: {p_name} ({p_id})")
-            
-            try:
-                page_info = graph_get(p_id, {'fields': 'instagram_business_account,name', 'access_token': p_token})
-                ig_account = page_info.get('instagram_business_account')
-                
-                if ig_account:
-                    logger.info(f"SUCCESS: Found Instagram Account {ig_account.get('id')} linked to {p_name}")
-                    instagram_account = ig_account
-                    target_page_id = p_id
-                    target_page_token = p_token
-                    subscribe_page_to_webhook(p_id, p_token)
-                    break
-                else:
-                    logger.warning(f"NOTE: Page '{p_name}' does not have an Instagram Business Account linked.")
-            except Exception as page_err:
-                logger.error(f"ERROR checking Page {p_name}: {str(page_err)}")
-            
-        if instagram_account:
-            # Get Instagram username
-            ig_id = instagram_account.get('id')
-            ig_info = graph_get(ig_id, {'fields': 'username', 'access_token': target_page_token})
-            username = ig_info.get('username')
-            
-            session['instagram_account_id'] = ig_id
-            session['instagram_username'] = username
-            session['instagram_page_token'] = target_page_token
-            
-            # Save to env logic would normally go here, but for this app we'll use session/token file
-            save_page_token(ig_id, target_page_token) # reuse for IG
-            save_instagram_account_context(ig_id, username)
 
-            return render_template('instagram_success.html', account_id=ig_id, username=username)
-        
-        error_msg = 'No Instagram Business Account found linked to your pages.'
-        if page_list_count == 0:
-            error_msg = 'No Facebook Pages found. Make sure you selected at least one Page in the login dialog.'
-        else:
-            error_msg = f'Found {page_list_count} pages, but none have an Instagram Business Account linked. Please check your Page Settings on Facebook.'
-            
-        return render_template('instagram_index.html', error=error_msg), 400
+        businesses = get_user_businesses(user_access_token)
+        logger.info(
+            "Instagram OAuth retrieved %s businesses from Meta after requesting business_management. business_ids=%s",
+            len(businesses),
+            [business.get('id') for business in businesses if business.get('id')]
+        )
+        if not businesses:
+            response, _ = get_business_selection_template(
+                'instagram',
+                [],
+                error=NO_BUSINESS_PORTFOLIO_MESSAGE,
+                status_code=400
+            )
+            return response, 400
+
+        return get_business_selection_template('instagram', businesses)
     except requests.HTTPError as e:
         logger.exception("Instagram auth callback token exchange failed.")
         return render_template('instagram_index.html', error=format_oauth_exchange_error(e, 'Instagram')), 400
+    except ValueError as e:
+        logger.warning("Instagram auth callback validation failed: %s", e)
+        return render_template('instagram_index.html', error=str(e)), 400
     except Exception as e:
         logger.exception("IG OAuth error")
         return render_template('instagram_index.html', error='Instagram login failed unexpectedly. Please try connecting again.'), 500
+
+@app.route('/instagram/select-business/<business_id>')
+def instagram_select_business(business_id):
+    user_token = session.get('user_access_token')
+    if not user_token:
+        return redirect(url_for('instagram_connect'))
+
+    try:
+        business = find_business_or_none(user_token, business_id)
+        if not business:
+            businesses = get_user_businesses(user_token)
+            return get_business_selection_template(
+                'instagram',
+                businesses,
+                error='The selected Business Portfolio was not returned by Meta. Reconnect and select the Business again.',
+                status_code=400
+            )
+
+        session['selected_business_id'] = business.get('id')
+        session['selected_business_name'] = business.get('name') or f"Business {business_id}"
+        pages = get_page_assets_for_selected_business(user_token)
+        assets = build_instagram_asset_options(pages)
+        connectable_count = len([asset for asset in assets if asset.get('connectable')])
+        logger.info(
+            "Instagram selected business %s returned %s page assets and %s connectable Instagram assets.",
+            business_id,
+            len(assets),
+            connectable_count
+        )
+
+        error_msg = None
+        if not pages:
+            error_msg = 'No owned Facebook Pages were returned for this Business Portfolio. Add a Page to Business Manager or select a different Business.'
+        elif connectable_count == 0:
+            error_msg = 'This Business Portfolio has no Pages linked to an Instagram Business account. Link Instagram to a Page in Business Settings, then reconnect.'
+
+        return render_template(
+            'select_instagram_asset.html',
+            business=business,
+            assets=assets,
+            error=error_msg
+        ), 400 if error_msg else 200
+    except requests.HTTPError as e:
+        logger.exception("Fetching Instagram business assets failed.")
+        return get_business_selection_template(
+            'instagram',
+            get_user_businesses(user_token),
+            error=format_oauth_exchange_error(e, 'Instagram'),
+            status_code=400
+        )
+    except Exception:
+        logger.exception("Selecting Instagram business %s failed.", business_id)
+        return render_template('instagram_index.html', error='Could not load Instagram assets for that Business Portfolio. Please reconnect and try again.'), 500
+
+@app.route('/instagram/connect-page/<page_id>')
+def instagram_connect_page(page_id):
+    user_token = session.get('user_access_token')
+    if not user_token:
+        return redirect(url_for('instagram_connect'))
+
+    try:
+        pages = get_page_assets_for_selected_business(user_token)
+        page_data = next((page for page in pages if page.get('id') == page_id), None)
+        business_id, business_name = get_selected_business_context()
+        business = {'id': business_id, 'name': business_name} if business_id else None
+        assets = build_instagram_asset_options(pages)
+
+        if not page_data:
+            return render_template(
+                'select_instagram_asset.html',
+                business=business,
+                assets=assets,
+                error='The selected Page was not returned for this Business Portfolio. Select another asset or reconnect.'
+            ), 400
+
+        page_token = page_data.get('access_token')
+        if not page_token:
+            return render_template(
+                'select_instagram_asset.html',
+                business=business,
+                assets=assets,
+                error='Meta did not return a Page access token for the selected asset. Reconnect and verify the granted permissions.'
+            ), 502
+
+        page_info = graph_get(page_id, {
+            'fields': 'instagram_business_account,name',
+            'access_token': page_token
+        })
+        instagram_account = page_info.get('instagram_business_account')
+        if not instagram_account or not instagram_account.get('id'):
+            return render_template(
+                'select_instagram_asset.html',
+                business=business,
+                assets=assets,
+                error='The selected Page is not linked to an Instagram Business account.'
+            ), 400
+
+        ig_id = instagram_account.get('id')
+        ig_info = graph_get(ig_id, {'fields': 'username', 'access_token': page_token})
+        username = ig_info.get('username') or ig_id
+        subscribe_page_to_webhook(page_id, page_token)
+
+        session['instagram_account_id'] = ig_id
+        session['instagram_username'] = username
+        session['instagram_page_token'] = page_token
+        session['instagram_page_id'] = page_id
+
+        save_page_token(ig_id, page_token)
+        save_instagram_account_context(ig_id, username)
+
+        return render_template(
+            'instagram_success.html',
+            account_id=ig_id,
+            username=username,
+            business_id=business_id,
+            business_name=business_name,
+            page_id=page_id,
+            page_name=page_data.get('name')
+        )
+    except requests.HTTPError as e:
+        logger.exception("Connecting Instagram asset for page %s failed.", page_id)
+        business_id, business_name = get_selected_business_context()
+        pages = get_page_assets_for_selected_business(user_token)
+        return render_template(
+            'select_instagram_asset.html',
+            business={'id': business_id, 'name': business_name} if business_id else None,
+            assets=build_instagram_asset_options(pages),
+            error=format_oauth_exchange_error(e, 'Instagram')
+        ), 400
+    except Exception:
+        logger.exception("Connecting Instagram asset for page %s failed.", page_id)
+        return render_template('instagram_index.html', error='Instagram connection failed unexpectedly. Please reconnect and try again.'), 500
 
 # -----------------------------------------------------------------------------
 # WhatsApp routes

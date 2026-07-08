@@ -178,10 +178,22 @@
                 <span class="label">Connected Page</span>
                 <div class="value">{{ page_name }}</div>
             </div>
+            {% if business_name %}
+            <div class="info-row">
+                <span class="label">Business Portfolio</span>
+                <div class="value">{{ business_name }}</div>
+            </div>
+            {% endif %}
             {% if page_id %}
             <div class="info-row">
                 <span class="label">Page ID</span>
                 <div class="value" style="font-family: monospace; color: var(--primary);">{{ page_id }}</div>
+            </div>
+            {% endif %}
+            {% if business_id %}
+            <div class="info-row">
+                <span class="label">Business ID</span>
+                <div class="value" style="font-family: monospace; color: var(--primary);">{{ business_id }}</div>
             </div>
             {% endif %}
         </div>

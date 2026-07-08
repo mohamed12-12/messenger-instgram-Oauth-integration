@@ -183,10 +183,28 @@
                 <span class="label">Instagram Account</span>
                 <div class="value">@{{ username }}</div>
             </div>
+            {% if business_name %}
+            <div class="info-row">
+                <span class="label">Business Portfolio</span>
+                <div class="value">{{ business_name }}</div>
+            </div>
+            {% endif %}
+            {% if page_name %}
+            <div class="info-row">
+                <span class="label">Connected Page</span>
+                <div class="value">{{ page_name }}</div>
+            </div>
+            {% endif %}
             <div class="info-row">
                 <span class="label">Account ID</span>
                 <code class="value">{{ account_id }}</code>
             </div>
+            {% if business_id %}
+            <div class="info-row">
+                <span class="label">Business ID</span>
+                <code class="value">{{ business_id }}</code>
+            </div>
+            {% endif %}
         </div>
 
         <a href="/instagram/dashboard/{{ account_id }}" class="btn">

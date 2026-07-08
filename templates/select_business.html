@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Business - Nanovate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #6D68D0;
+            --text-main: #111827;
+            --text-sub: #6B7280;
+            --primary: #1A56DB;
+            --border: #e5e7eb;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 24px;
+            padding: 52px 40px;
+            width: 100%;
+            max-width: 720px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        .eyebrow {
+            color: var(--primary);
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+        }
+
+        h1 { font-size: 30px; margin-bottom: 10px; color: var(--text-main); }
+        .desc { color: var(--text-sub); margin-bottom: 32px; font-size: 16px; line-height: 1.5; }
+
+        .error {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 12px;
+            color: #991b1b;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 24px;
+            padding: 14px 16px;
+        }
+
+        .business-list { display: flex; flex-direction: column; gap: 14px; }
+
+        .business-item {
+            background: #f9fafb;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            text-decoration: none;
+            color: inherit;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .business-item:hover { border-color: var(--primary); background: #f3f4f6; }
+
+        .business-info { display: flex; align-items: center; gap: 16px; text-align: left; min-width: 0; }
+
+        .business-avatar {
+            width: 48px;
+            height: 48px;
+            background: #111827;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            flex: 0 0 auto;
+        }
+
+        .business-name { font-weight: 700; font-size: 17px; margin-bottom: 4px; word-break: break-word; }
+        .business-id { font-size: 12px; color: var(--text-sub); font-family: monospace; }
+        .select-icon { color: var(--primary); width: 24px; height: 24px; flex: 0 0 auto; }
+
+        .empty-state {
+            border: 1px dashed #fca5a5;
+            border-radius: 12px;
+            color: #991b1b;
+            padding: 28px;
+            line-height: 1.5;
+            background: #fff7f7;
+        }
+
+        .debug {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: #475569;
+            font-size: 12px;
+            line-height: 1.6;
+            margin-top: 28px;
+            padding: 14px 16px;
+        }
+
+        code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <div class="eyebrow">{{ 'Instagram' if flow == 'instagram' else 'Messenger' }} setup</div>
+        <h1>Choose the Business Portfolio</h1>
+        <p class="desc">
+            Select the Business Portfolio Nanovate should use before choosing the Page or Instagram asset to connect.
+        </p>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if no_businesses %}
+        <div class="empty-state">
+            Meta did not return any Business Portfolios for this account. Create or join a Business Manager first, then reconnect with an admin or full-control user.
+        </div>
+        {% else %}
+        <div class="business-list">
+            {% for business in businesses %}
+            <a href="{{ '/instagram/select-business/' ~ business.id if flow == 'instagram' else '/select-business/' ~ business.id }}" class="business-item" id="business-{{ business.id }}">
+                <div class="business-info">
+                    <div class="business-avatar">{{ business.name[0] | upper }}</div>
+                    <div>
+                        <div class="business-name">{{ business.name }}</div>
+                        <div class="business-id">Business ID: {{ business.id }}</div>
+                    </div>
+                </div>
+                <div class="select-icon">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="debug">
+            <strong>Dev verification:</strong>
+            Graph {{ graph_version }} is requesting
+            <code>{{ instagram_scopes if flow == 'instagram' else messenger_scopes }}</code>.
+            Confirm Meta showed the Business Portfolio consent screen before submitting App Review.
+        </div>
+    </main>
+</body>
+</html>
