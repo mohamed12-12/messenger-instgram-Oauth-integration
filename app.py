@@ -843,6 +843,80 @@ def build_page_comment_items(posts: list, page_id: str, page_name: str) -> list:
     comment_items.sort(key=lambda item: item.get('comment_created_time') or '', reverse=True)
     return comment_items[:25]
 
+def build_page_post_items(posts: list, page_id: str, page_name: str) -> list:
+    post_items = []
+    for post in posts:
+        post_items.append({
+            'page_id': page_id,
+            'page_name': page_name,
+            'post_id': post.get('id'),
+            'post_text': post.get('message') or post.get('story') or '[no post text]',
+            'post_author': post.get('from_name') or page_name,
+            'post_created_time': post.get('created_time'),
+            'post_permalink_url': post.get('permalink_url')
+        })
+
+    post_items.sort(key=lambda item: item.get('post_created_time') or '', reverse=True)
+    return post_items[:10]
+
+def fetch_page_ratings(page_id: str, page_access_token: str) -> list:
+    try:
+        payload = graph_get(f'{page_id}/ratings', {
+            'fields': 'created_time,review_text,recommendation_type,reviewer,open_graph_story',
+            'limit': 10,
+            'access_token': page_access_token
+        })
+    except requests.HTTPError as exc:
+        logger.warning("Retrying Page ratings fetch without explicit fields for page %s: %s", page_id, exc)
+        payload = graph_get(f'{page_id}/ratings', {
+            'limit': 10,
+            'access_token': page_access_token
+        })
+
+    ratings = []
+    for item in payload.get('data', []):
+        reviewer = item.get('reviewer') or item.get('from') or {}
+        story = item.get('open_graph_story') or {}
+        ratings.append({
+            'id': item.get('id') or story.get('id'),
+            'author': reviewer.get('name') or 'Unknown',
+            'text': item.get('review_text') or story.get('message') or item.get('recommendation_type') or '[no rating text]',
+            'created_time': item.get('created_time') or story.get('created_time'),
+            'recommendation_type': item.get('recommendation_type')
+        })
+
+    return ratings
+
+def fetch_page_tagged_posts(page_id: str, page_access_token: str) -> list:
+    payload = graph_get(f'{page_id}/tagged', {
+        'fields': 'id,message,story,created_time,from,permalink_url',
+        'limit': 10,
+        'access_token': page_access_token
+    })
+
+    tagged_posts = []
+    for item in payload.get('data', []):
+        tagged_posts.append({
+            'id': item.get('id'),
+            'author': (item.get('from') or {}).get('name') or 'Unknown',
+            'text': item.get('message') or item.get('story') or '[no post text]',
+            'created_time': item.get('created_time'),
+            'permalink_url': item.get('permalink_url')
+        })
+
+    return tagged_posts
+
+def try_fetch_page_section(fetcher, *args):
+    try:
+        return fetcher(*args), None
+    except requests.HTTPError as exc:
+        message, _ = format_graph_api_error(exc, 'This section could not be loaded from Meta.')
+        logger.warning("Page user content section failed: %s", extract_graph_api_error_message(exc))
+        return [], message
+    except Exception as exc:
+        logger.warning("Page user content section failed: %s", exc)
+        return [], 'This section could not be loaded from Meta.'
+
 def fetch_page_picture_url(page_id: str, page_access_token: str) -> str:
     if not page_id or not page_access_token:
         return None
@@ -2145,14 +2219,26 @@ def page_user_content_api():
     try:
         content = fetch_page_user_content(page_id, page_token)
         page_name = get_saved_page_name(page_id) or f'Page {page_id}'
+        posts = build_page_post_items(content, page_id, page_name)
         comments = build_page_comment_items(content, page_id, page_name)
+        ratings, ratings_error = try_fetch_page_section(fetch_page_ratings, page_id, page_token)
+        tagged_posts, tagged_error = try_fetch_page_section(fetch_page_tagged_posts, page_id, page_token)
         return jsonify({
             'success': True,
             'page_id': page_id,
             'page_name': page_name,
+            'posts': posts,
             'comments': comments,
+            'ratings': ratings,
+            'tagged_posts': tagged_posts,
+            'section_errors': {
+                'ratings': ratings_error,
+                'tagged_posts': tagged_error
+            },
             'post_count': len(content),
             'comment_count': len(comments),
+            'rating_count': len(ratings),
+            'tagged_post_count': len(tagged_posts),
             'permission_used': 'pages_read_user_content',
             'graph_edge': f'/{page_id}/feed',
             'synced_at': int(time.time())
@@ -2176,6 +2262,48 @@ def page_user_content_api():
             'error': 'Could not read Page user content.',
             'permission_used': 'pages_read_user_content'
         }), 500
+
+@app.route('/api/page-user-comment/delete', methods=['POST'])
+def delete_page_user_comment_api():
+    data = request.get_json(silent=True) or request.form
+    page_id = data.get('page_id') or session.get('connected_page_id')
+    comment_id = data.get('comment_id')
+    page_token = get_connected_page_token(page_id)
+    connected_session_page_id = session.get('connected_page_id')
+
+    if not page_id:
+        return jsonify({'success': False, 'error': 'No Facebook Page is connected. Please connect Facebook first.'}), 400
+    if connected_session_page_id and connected_session_page_id != page_id:
+        return jsonify({'success': False, 'error': 'This Facebook Page is not connected in your current session.'}), 403
+    if not comment_id:
+        return jsonify({'success': False, 'error': 'No Facebook comment was selected.'}), 400
+    if not page_token:
+        return jsonify({'success': False, 'error': 'Facebook authorization has expired. Please reconnect your account.'}), 401
+
+    try:
+        content = fetch_page_user_content(page_id, page_token)
+        allowed_comment_ids = {
+            comment.get('comment_id')
+            for comment in build_page_comment_items(content, page_id, get_saved_page_name(page_id) or f'Page {page_id}')
+        }
+        if comment_id not in allowed_comment_ids:
+            return jsonify({'success': False, 'error': 'This comment was not found on the connected Facebook Page.'}), 403
+
+        result = graph_delete(comment_id, {'access_token': page_token})
+        return jsonify({
+            'success': bool(result.get('success', True)),
+            'message': 'Facebook comment deleted.',
+            'comment_id': comment_id,
+            'permission_used': 'pages_read_user_content'
+        })
+    except requests.HTTPError as e:
+        message, status_code = format_graph_api_error(e, 'Could not delete the Facebook comment.')
+        if status_code == 403:
+            message = 'Nanovate does not currently have permission to delete Page user comments.'
+        return jsonify({'success': False, 'error': message}), status_code
+    except Exception:
+        logger.exception("Deleting Page user comment failed for page %s.", page_id)
+        return jsonify({'success': False, 'error': 'Could not delete the Facebook comment.'}), 500
 
 @app.route('/api/instagram-debug')
 def instagram_debug():

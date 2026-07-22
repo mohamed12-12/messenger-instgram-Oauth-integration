@@ -158,7 +158,7 @@ Use it to:
 
 - Send manual messages to a PSID
 - View recent page events
-- Refresh Facebook Page comments for App Review testing of `pages_read_user_content`
+- Refresh Facebook Page posts, comments, ratings/recommendations, and tagged posts for App Review testing of `pages_read_user_content`
 - Check page subscription and debug state
 
 ### Instagram messaging dashboard

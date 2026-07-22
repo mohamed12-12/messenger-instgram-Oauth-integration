@@ -51,11 +51,13 @@ Purpose:
 ### Page user content review
 
 - `GET /api/page-user-content?page_id=<page_id>`
+- `POST /api/page-user-comment/delete`
 
 Purpose:
 
-- reads recent Page feed items and recent comments through the connected Page token
-- returns simple comment records with Page, post, author, comment text, comment time, and identifiers
+- reads recent Page posts, user comments, ratings/recommendations, and tagged posts through the connected Page token
+- returns simple records with Page, post, author, text, time, and identifiers
+- deletes a selected user comment after verifying it belongs to the connected Page
 - demonstrates the `pages_read_user_content` permission for Meta App Review
 
 Success response:
@@ -66,9 +68,14 @@ Success response:
   "page_id": "...",
   "permission_used": "pages_read_user_content",
   "graph_edge": "/<page_id>/feed",
+  "posts": [],
+  "comments": [],
+  "ratings": [],
+  "tagged_posts": [],
   "post_count": 0,
   "comment_count": 0,
-  "comments": []
+  "rating_count": 0,
+  "tagged_post_count": 0
 }
 ```
 

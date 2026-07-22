@@ -380,6 +380,16 @@
             gap: 12px;
         }
 
+        .content-section {
+            margin-top: 20px;
+        }
+
+        .content-section h4 {
+            color: var(--text-main);
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
         .comment-card {
             background: #f9fafb;
             border: 1px solid #e5e7eb;
@@ -424,6 +434,56 @@
             font-weight: 600;
             margin-top: 10px;
             text-decoration: none;
+        }
+
+        .delete-comment-btn {
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            border-radius: 10px;
+            color: #991b1b;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 10px;
+            padding: 8px 10px;
+        }
+
+        .delete-comment-btn:hover {
+            background: #fecaca;
+        }
+
+        .simple-card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .simple-title {
+            color: var(--text-main);
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .simple-meta {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.5;
+            margin-bottom: 6px;
+        }
+
+        .simple-text {
+            color: #1f2937;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        .section-warning {
+            color: #991b1b;
+            font-size: 12px;
+            margin-bottom: 8px;
         }
 
         .empty-state {
@@ -503,10 +563,25 @@
                         </button>
                     </div>
                     <div class="review-note">
-                        Meta permission shown: <code>pages_read_user_content</code> reads user-generated comments on Page posts for Page management.
+                        Meta permission shown: <code>pages_read_user_content</code> reads Page posts, user comments, Page ratings/recommendations, and posts that tag this Page. It can also delete user comments on Page posts.
                     </div>
                     <div id="page-user-content-result" class="result-box"></div>
-                    <div id="page-comments-feed" class="comments-list"></div>
+                    <div class="content-section">
+                        <h4>Page Posts</h4>
+                        <div id="page-posts-feed" class="comments-list"></div>
+                    </div>
+                    <div class="content-section">
+                        <h4>User Comments</h4>
+                        <div id="page-comments-feed" class="comments-list"></div>
+                    </div>
+                    <div class="content-section">
+                        <h4>Ratings / Recommendations</h4>
+                        <div id="page-ratings-feed" class="comments-list"></div>
+                    </div>
+                    <div class="content-section">
+                        <h4>Posts Tagging This Page</h4>
+                        <div id="page-tagged-feed" class="comments-list"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -538,7 +613,10 @@
         const debugBox = document.getElementById('debug-box');
         const loadUserContentBtn = document.getElementById('load-user-content');
         const pageUserContentResult = document.getElementById('page-user-content-result');
+        const pagePostsFeed = document.getElementById('page-posts-feed');
         const pageCommentsFeed = document.getElementById('page-comments-feed');
+        const pageRatingsFeed = document.getElementById('page-ratings-feed');
+        const pageTaggedFeed = document.getElementById('page-tagged-feed');
         const pageUserContentSync = document.getElementById('page-user-content-sync');
 
         function copyPSID(id) { document.getElementById('recipient_id').value = id; }
@@ -553,14 +631,71 @@
             pageUserContentResult.textContent = message;
         }
 
+        function renderEmpty(container, message) {
+            container.innerHTML = '';
+            const empty = document.createElement('div');
+            empty.className = 'empty-state';
+            setText(empty, message);
+            container.appendChild(empty);
+        }
+
+        function createSimpleCard(title, meta, text, linkUrl, linkText) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'simple-card';
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'simple-title';
+            setText(titleEl, title);
+
+            const metaEl = document.createElement('div');
+            metaEl.className = 'simple-meta';
+            setText(metaEl, meta);
+
+            const textEl = document.createElement('div');
+            textEl.className = 'simple-text';
+            setText(textEl, text);
+
+            wrapper.appendChild(titleEl);
+            wrapper.appendChild(metaEl);
+            wrapper.appendChild(textEl);
+
+            if (linkUrl) {
+                const link = document.createElement('a');
+                link.className = 'comment-link';
+                link.href = linkUrl;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                setText(link, linkText || 'Open on Facebook');
+                wrapper.appendChild(link);
+            }
+
+            return wrapper;
+        }
+
+        function renderPosts(posts) {
+            pagePostsFeed.innerHTML = '';
+            if (!posts.length) {
+                renderEmpty(pagePostsFeed, 'No Facebook Page posts were found.');
+                return;
+            }
+
+            posts.forEach(post => {
+                const created = post.post_created_time ? new Date(post.post_created_time).toLocaleString() : 'Unknown time';
+                pagePostsFeed.appendChild(createSimpleCard(
+                    post.post_author || post.page_name || 'Page post',
+                    `${created} | Page: ${post.page_name || 'Unknown Page'} | Post ID: ${post.post_id || 'Unknown'}`,
+                    post.post_text || '[no post text]',
+                    post.post_permalink_url,
+                    'Open post on Facebook'
+                ));
+            });
+        }
+
         function renderComments(comments) {
             pageCommentsFeed.innerHTML = '';
 
             if (!comments.length) {
-                const empty = document.createElement('div');
-                empty.className = 'empty-state';
-                setText(empty, 'No Facebook Page comments were found.');
-                pageCommentsFeed.appendChild(empty);
+                renderEmpty(pageCommentsFeed, 'No Facebook Page comments were found.');
                 return;
             }
 
@@ -603,8 +738,100 @@
                     wrapper.appendChild(link);
                 }
 
+                const deleteButton = document.createElement('button');
+                deleteButton.type = 'button';
+                deleteButton.className = 'delete-comment-btn';
+                deleteButton.dataset.commentId = comment.comment_id || '';
+                setText(deleteButton, 'Delete comment');
+                deleteButton.onclick = () => deleteComment(comment.comment_id, wrapper);
+                wrapper.appendChild(deleteButton);
+
                 pageCommentsFeed.appendChild(wrapper);
             });
+        }
+
+        function renderRatings(ratings, sectionError) {
+            pageRatingsFeed.innerHTML = '';
+            if (sectionError) {
+                const warning = document.createElement('div');
+                warning.className = 'section-warning';
+                setText(warning, sectionError);
+                pageRatingsFeed.appendChild(warning);
+            }
+            if (!ratings.length) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                setText(empty, 'No Facebook Page ratings or recommendations were found.');
+                pageRatingsFeed.appendChild(empty);
+                return;
+            }
+
+            ratings.forEach(rating => {
+                const created = rating.created_time ? new Date(rating.created_time).toLocaleString() : 'Unknown time';
+                pageRatingsFeed.appendChild(createSimpleCard(
+                    rating.author || 'Unknown reviewer',
+                    `${created}${rating.recommendation_type ? ` | ${rating.recommendation_type}` : ''}`,
+                    rating.text || '[no rating text]'
+                ));
+            });
+        }
+
+        function renderTaggedPosts(taggedPosts, sectionError) {
+            pageTaggedFeed.innerHTML = '';
+            if (sectionError) {
+                const warning = document.createElement('div');
+                warning.className = 'section-warning';
+                setText(warning, sectionError);
+                pageTaggedFeed.appendChild(warning);
+            }
+            if (!taggedPosts.length) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                setText(empty, 'No posts tagging this Facebook Page were found.');
+                pageTaggedFeed.appendChild(empty);
+                return;
+            }
+
+            taggedPosts.forEach(post => {
+                const created = post.created_time ? new Date(post.created_time).toLocaleString() : 'Unknown time';
+                pageTaggedFeed.appendChild(createSimpleCard(
+                    post.author || 'Unknown author',
+                    `${created} | Tagged post ID: ${post.id || 'Unknown'}`,
+                    post.text || '[no post text]',
+                    post.permalink_url,
+                    'Open tagged post on Facebook'
+                ));
+            });
+        }
+
+        async function deleteComment(commentId, card) {
+            if (!commentId) {
+                showUserContentResult(false, 'No Facebook comment was selected.');
+                return;
+            }
+            if (!confirm('Delete this Facebook comment from the connected Page?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/page-user-comment/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ page_id: connectedPageId || '', comment_id: commentId })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showUserContentResult(false, data.error || 'Could not delete the Facebook comment.');
+                    return;
+                }
+                card.remove();
+                showUserContentResult(true, 'Facebook comment deleted.');
+                if (!pageCommentsFeed.children.length) {
+                    renderEmpty(pageCommentsFeed, 'No Facebook Page comments were found.');
+                }
+            } catch (err) {
+                showUserContentResult(false, 'Meta API request failed. Please try again.');
+            }
         }
 
         async function updateFeed() {
@@ -714,7 +941,10 @@
         loadUserContentBtn.onclick = async () => {
             loadUserContentBtn.disabled = true;
             loadUserContentBtn.textContent = 'Loading...';
+            pagePostsFeed.innerHTML = '';
             pageCommentsFeed.innerHTML = '';
+            pageRatingsFeed.innerHTML = '';
+            pageTaggedFeed.innerHTML = '';
             try {
                 const response = await fetch(`/api/page-user-content?page_id=${encodeURIComponent(connectedPageId || '')}`);
                 const data = await response.json();
@@ -725,8 +955,11 @@
 
                 const syncedAt = data.synced_at ? new Date(data.synced_at * 1000).toLocaleString() : new Date().toLocaleString();
                 pageUserContentSync.textContent = `Last refreshed: ${syncedAt}`;
-                showUserContentResult(true, `Loaded ${data.comment_count} comment(s) for ${data.page_name}.`);
+                showUserContentResult(true, `Loaded ${data.post_count} post(s), ${data.comment_count} comment(s), ${data.rating_count} rating/recommendation item(s), and ${data.tagged_post_count} tagged post(s) for ${data.page_name}.`);
+                renderPosts(data.posts || []);
                 renderComments(data.comments || []);
+                renderRatings(data.ratings || [], data.section_errors?.ratings);
+                renderTaggedPosts(data.tagged_posts || [], data.section_errors?.tagged_posts);
             } catch (err) {
                 showUserContentResult(false, 'Meta API request failed. Please try again.');
             } finally {
