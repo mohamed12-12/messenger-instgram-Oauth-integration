@@ -27,8 +27,9 @@ Record one continuous video:
 6. Select the Facebook Page.
 7. Open `/dashboard/<page_id>`.
 8. Open the `Facebook Page Comments` section.
-9. Click `Refresh Comments`.
-10. Show the app displaying the Facebook Page name, related post, comment text, comment author, and comment time.
+9. Show the note that the screen uses `pages_read_user_content` to read user-generated comments on Page posts for Page management.
+10. Click `Refresh Comments`.
+11. Show the app displaying the Facebook Page name, related post, comment text, comment author, and comment time.
 
 ## Test setup checklist
 

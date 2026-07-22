@@ -358,6 +358,22 @@
             margin: 14px 0;
         }
 
+        .review-note {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            color: #1e3a8a;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 14px;
+            padding: 12px 14px;
+        }
+
+        .review-note code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+        }
+
         .comments-list {
             display: flex;
             flex-direction: column;
@@ -485,6 +501,9 @@
                         <button type="button" class="btn-tool" id="load-user-content">
                             Refresh Comments
                         </button>
+                    </div>
+                    <div class="review-note">
+                        Meta permission shown: <code>pages_read_user_content</code> reads user-generated comments on Page posts for Page management.
                     </div>
                     <div id="page-user-content-result" class="result-box"></div>
                     <div id="page-comments-feed" class="comments-list"></div>
