@@ -517,6 +517,14 @@ def extract_graph_api_error_payload(exc: Exception) -> dict:
     except ValueError:
         return {'raw_response': response.text}
 
+def extract_graph_api_error_message(exc: Exception) -> str:
+    payload = extract_graph_api_error_payload(exc)
+    if payload.get('error', {}).get('message'):
+        return payload['error']['message']
+    if payload.get('raw_response'):
+        return payload['raw_response']
+    return str(exc)
+
 def fetch_instagram_media_comments(ig_account_id: str, page_access_token: str) -> list:
     logger.info("Instagram comments fetch started for account %s", ig_account_id)
 
@@ -758,31 +766,57 @@ def get_page_assets_for_selected_business(user_access_token: str) -> list:
 
 def fetch_page_user_content(page_id: str, page_access_token: str) -> list:
     feed = graph_get(f'{page_id}/feed', {
-        'fields': 'id,message,story,created_time,from,permalink_url,comments.limit(25){id,message,from,created_time,permalink_url}',
+        'fields': 'id,message,story,created_time,from,permalink_url',
         'limit': 10,
         'access_token': page_access_token
     })
 
     items = []
     for post in feed.get('data', []):
+        post_id = post.get('id')
         comments = []
-        for comment in post.get('comments', {}).get('data', []):
-            comments.append({
-                'id': comment.get('id'),
-                'message': comment.get('message') or '',
-                'from_name': (comment.get('from') or {}).get('name') or 'Unknown',
-                'created_time': comment.get('created_time'),
-                'permalink_url': comment.get('permalink_url')
-            })
+        comment_fetch_error = None
+
+        if post_id:
+            try:
+                comment_payload = graph_get(f'{post_id}/comments', {
+                    'fields': 'id,message,from,created_time,permalink_url',
+                    'limit': 25,
+                    'access_token': page_access_token
+                })
+            except requests.HTTPError as exc:
+                logger.warning("Retrying comments fetch without permalink_url for post %s: %s", post_id, exc)
+                try:
+                    comment_payload = graph_get(f'{post_id}/comments', {
+                        'fields': 'id,message,from,created_time',
+                        'limit': 25,
+                        'access_token': page_access_token
+                    })
+                except Exception as retry_exc:
+                    comment_payload = {'data': []}
+                    comment_fetch_error = str(retry_exc)
+            except Exception as exc:
+                comment_payload = {'data': []}
+                comment_fetch_error = str(exc)
+
+            for comment in comment_payload.get('data', []):
+                comments.append({
+                    'id': comment.get('id'),
+                    'message': comment.get('message') or '',
+                    'from_name': (comment.get('from') or {}).get('name') or 'Unknown',
+                    'created_time': comment.get('created_time'),
+                    'permalink_url': comment.get('permalink_url')
+                })
 
         items.append({
-            'id': post.get('id'),
+            'id': post_id,
             'message': post.get('message') or '',
             'story': post.get('story') or '',
             'from_name': (post.get('from') or {}).get('name') or 'Unknown',
             'created_time': post.get('created_time'),
             'permalink_url': post.get('permalink_url'),
-            'comments': comments
+            'comments': comments,
+            'comment_fetch_error': comment_fetch_error
         })
 
     return items
@@ -2122,12 +2156,18 @@ def page_user_content_api():
         return jsonify({
             'success': False,
             'error': message,
+            'details': extract_graph_api_error_message(e),
             'permission_used': 'pages_read_user_content',
             'raw_graph_error': extract_graph_api_error_payload(e)
         }), status_code
-    except Exception:
+    except Exception as e:
         logger.exception("Reading Page user content failed for page %s.", page_id)
-        return jsonify({'success': False, 'error': 'Could not read Page user content.'}), 500
+        return jsonify({
+            'success': False,
+            'error': 'Could not read Page user content.',
+            'details': str(e),
+            'permission_used': 'pages_read_user_content'
+        }), 500
 
 @app.route('/api/instagram-debug')
 def instagram_debug():

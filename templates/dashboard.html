@@ -636,6 +636,15 @@
                     wrapper.appendChild(comments);
                 }
 
+                if (item.comment_fetch_error) {
+                    const warning = document.createElement('div');
+                    warning.className = 'content-comment';
+                    warning.style.color = '#991b1b';
+                    warning.style.marginTop = '10px';
+                    setText(warning, `Comment sync warning: ${item.comment_fetch_error}`);
+                    wrapper.appendChild(warning);
+                }
+
                 pageUserContentFeed.appendChild(wrapper);
             });
         }
@@ -861,7 +870,8 @@
                 const response = await fetch(`/api/page-user-content?page_id=${encodeURIComponent(connectedPageId || '')}`);
                 const data = await response.json();
                 if (!response.ok || !data.success) {
-                    showUserContentResult(false, data.error || 'Could not load Page user content.');
+                    const detail = data.details ? ` Details: ${data.details}` : '';
+                    showUserContentResult(false, `${data.error || 'Could not load Page user content.'}${detail}`);
                     return;
                 }
 
