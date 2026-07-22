@@ -343,6 +343,135 @@
             text-decoration: none;
         }
 
+        .moderation-toolbar {
+            align-items: center;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .sync-note {
+            color: var(--text-sub);
+            font-size: 12px;
+        }
+
+        .moderation-layout {
+            display: grid;
+            gap: 18px;
+            grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+            margin-top: 16px;
+        }
+
+        @media (max-width: 900px) {
+            .moderation-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .moderation-column h4 {
+            color: var(--text-main);
+            font-size: 13px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .comment-item {
+            background: #fff;
+            border: 1px solid #dbeafe;
+            border-left: 4px solid var(--primary);
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .comment-header {
+            align-items: flex-start;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .comment-author {
+            color: var(--text-main);
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .comment-time {
+            color: var(--text-sub);
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .comment-text {
+            color: #1f2937;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        .post-context {
+            background: #f9fafb;
+            border-radius: 10px;
+            color: #4b5563;
+            font-size: 12px;
+            line-height: 1.45;
+            margin-top: 10px;
+            padding: 10px;
+            overflow-wrap: anywhere;
+        }
+
+        .moderation-actions {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: 1fr 1fr;
+            margin-top: 12px;
+        }
+
+        .moderation-actions label {
+            margin-bottom: 4px;
+        }
+
+        .moderation-actions select {
+            width: 100%;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            color: var(--text-main);
+            font-size: 13px;
+            padding: 10px;
+        }
+
+        .follow-up-row {
+            align-items: center;
+            color: #374151;
+            display: flex;
+            font-size: 13px;
+            gap: 8px;
+            grid-column: 1 / -1;
+        }
+
+        .follow-up-row input {
+            width: auto;
+        }
+
+        .pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .pill {
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            border-radius: 999px;
+            color: #3730a3;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 5px 8px;
+        }
+
     </style>
 </head>
 
@@ -382,15 +511,27 @@
                 <div id="result" class="result-box"></div>
 
                 <div class="content-review">
-                    <h3>Page User Content Review</h3>
+                    <h3>Facebook Comments Moderation</h3>
                     <p class="hint">
-                        Loads recent Page feed items and comments from Meta using the approved Page token.
+                        Page: <strong>{{ page_name }}</strong>{% if page_id %} | {{ page_id }}{% endif %}
                     </p>
-                    <button type="button" class="btn-tool" id="load-user-content">
-                        Load Latest Page Feed
-                    </button>
+                    <div class="moderation-toolbar">
+                        <button type="button" class="btn-tool" id="load-user-content">
+                            Refresh Page Data
+                        </button>
+                        <span class="sync-note" id="page-user-content-sync">Not synchronized yet</span>
+                    </div>
                     <div id="page-user-content-result" class="result-box"></div>
-                    <div id="page-user-content-feed" class="content-feed"></div>
+                    <div class="moderation-layout">
+                        <section class="moderation-column">
+                            <h4>Facebook Comments</h4>
+                            <div id="page-comments-feed" class="content-feed"></div>
+                        </section>
+                        <section class="moderation-column">
+                            <h4>Related Posts</h4>
+                            <div id="page-user-content-feed" class="content-feed"></div>
+                        </section>
+                    </div>
                 </div>
             </div>
         </div>
@@ -423,6 +564,8 @@
         const loadUserContentBtn = document.getElementById('load-user-content');
         const pageUserContentResult = document.getElementById('page-user-content-result');
         const pageUserContentFeed = document.getElementById('page-user-content-feed');
+        const pageCommentsFeed = document.getElementById('page-comments-feed');
+        const pageUserContentSync = document.getElementById('page-user-content-sync');
 
         function copyPSID(id) { document.getElementById('recipient_id').value = id; }
 
@@ -436,7 +579,14 @@
             pageUserContentResult.textContent = message;
         }
 
-        function renderPageUserContent(items) {
+        function createPill(text) {
+            const pill = document.createElement('span');
+            pill.className = 'pill';
+            setText(pill, text);
+            return pill;
+        }
+
+        function renderPostList(items) {
             pageUserContentFeed.innerHTML = '';
 
             if (!items.length) {
@@ -479,7 +629,8 @@
                     item.comments.forEach(comment => {
                         const row = document.createElement('div');
                         row.className = 'content-comment';
-                        setText(row, `${comment.from_name || 'Unknown'}: ${comment.message || '[no comment text]'}`);
+                        const commentDate = comment.created_time ? new Date(comment.created_time).toLocaleString() : 'Unknown time';
+                        setText(row, `${comment.from_name || 'Unknown'} | ${commentDate}: ${comment.message || '[no comment text]'}`);
                         comments.appendChild(row);
                     });
                     wrapper.appendChild(comments);
@@ -487,6 +638,114 @@
 
                 pageUserContentFeed.appendChild(wrapper);
             });
+        }
+
+        function renderModerationComments(comments, pageName) {
+            pageCommentsFeed.innerHTML = '';
+
+            if (!comments.length) {
+                const empty = document.createElement('div');
+                empty.className = 'comment-item';
+                setText(empty, 'No Facebook comments were returned for this Page sync.');
+                pageCommentsFeed.appendChild(empty);
+                return;
+            }
+
+            comments.forEach(comment => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'comment-item';
+
+                const header = document.createElement('div');
+                header.className = 'comment-header';
+
+                const author = document.createElement('div');
+                author.className = 'comment-author';
+                setText(author, comment.comment_author || 'Unknown author');
+
+                const time = document.createElement('div');
+                time.className = 'comment-time';
+                setText(time, comment.comment_created_time ? new Date(comment.comment_created_time).toLocaleString() : 'Unknown time');
+
+                header.appendChild(author);
+                header.appendChild(time);
+
+                const text = document.createElement('div');
+                text.className = 'comment-text';
+                setText(text, comment.comment_text || '[no comment text]');
+
+                const post = document.createElement('div');
+                post.className = 'post-context';
+                setText(post, `Page: ${comment.page_name || pageName || 'Unknown Page'} | Post: ${comment.post_text || '[no post text]'} | Post ID: ${comment.post_id || 'Unknown'}`);
+
+                const pills = document.createElement('div');
+                pills.className = 'pill-row';
+                pills.appendChild(createPill(comment.status || 'Needs review'));
+                pills.appendChild(createPill(`Sentiment: ${comment.sentiment || 'Neutral'}`));
+                pills.appendChild(createPill(`Comment ID: ${comment.comment_id || 'Unknown'}`));
+
+                const actions = document.createElement('div');
+                actions.className = 'moderation-actions';
+
+                const assignGroup = document.createElement('div');
+                const assignLabel = document.createElement('label');
+                setText(assignLabel, 'Assign to');
+                const assign = document.createElement('select');
+                ['Unassigned', 'Support', 'Sales', 'Tech Ops'].forEach(optionText => {
+                    const option = document.createElement('option');
+                    setText(option, optionText);
+                    assign.appendChild(option);
+                });
+                assignGroup.appendChild(assignLabel);
+                assignGroup.appendChild(assign);
+
+                const statusGroup = document.createElement('div');
+                const statusLabel = document.createElement('label');
+                setText(statusLabel, 'Status');
+                const status = document.createElement('select');
+                ['Needs review', 'Assigned', 'Resolved', 'Follow-up'].forEach(optionText => {
+                    const option = document.createElement('option');
+                    setText(option, optionText);
+                    status.appendChild(option);
+                });
+                statusGroup.appendChild(statusLabel);
+                statusGroup.appendChild(status);
+
+                const follow = document.createElement('label');
+                follow.className = 'follow-up-row';
+                const followInput = document.createElement('input');
+                followInput.type = 'checkbox';
+                const followText = document.createElement('span');
+                setText(followText, 'Mark interaction for follow-up');
+                follow.appendChild(followInput);
+                follow.appendChild(followText);
+
+                actions.appendChild(assignGroup);
+                actions.appendChild(statusGroup);
+                actions.appendChild(follow);
+
+                wrapper.appendChild(header);
+                wrapper.appendChild(text);
+                wrapper.appendChild(post);
+                wrapper.appendChild(pills);
+                wrapper.appendChild(actions);
+
+                if (comment.comment_permalink_url) {
+                    const link = document.createElement('a');
+                    link.className = 'content-link';
+                    link.href = comment.comment_permalink_url;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    setText(link, 'Open comment on Facebook');
+                    wrapper.appendChild(link);
+                }
+
+                pageCommentsFeed.appendChild(wrapper);
+            });
+        }
+
+        function renderPageUserContent(data) {
+            renderModerationComments(data.comments || [], data.page_name);
+            renderPostList(data.items || []);
         }
 
         async function updateFeed() {
@@ -595,8 +854,9 @@
 
         loadUserContentBtn.onclick = async () => {
             loadUserContentBtn.disabled = true;
-            loadUserContentBtn.textContent = 'Loading...';
+            loadUserContentBtn.textContent = 'Synchronizing...';
             pageUserContentFeed.innerHTML = '';
+            pageCommentsFeed.innerHTML = '';
             try {
                 const response = await fetch(`/api/page-user-content?page_id=${encodeURIComponent(connectedPageId || '')}`);
                 const data = await response.json();
@@ -605,13 +865,15 @@
                     return;
                 }
 
-                showUserContentResult(true, `Loaded ${data.items.length} feed item(s) through ${data.permission_used}.`);
-                renderPageUserContent(data.items || []);
+                const syncedAt = data.synced_at ? new Date(data.synced_at * 1000).toLocaleString() : new Date().toLocaleString();
+                pageUserContentSync.textContent = `Last synchronized: ${syncedAt}`;
+                showUserContentResult(true, `Synchronized ${data.items.length} post(s) and ${data.comments.length} comment(s) for ${data.page_name}.`);
+                renderPageUserContent(data);
             } catch (err) {
                 showUserContentResult(false, err.message);
             } finally {
                 loadUserContentBtn.disabled = false;
-                loadUserContentBtn.textContent = 'Load Latest Page Feed';
+                loadUserContentBtn.textContent = 'Refresh Page Data';
             }
         };
     </script>

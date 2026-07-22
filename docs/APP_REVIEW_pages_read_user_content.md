@@ -7,7 +7,7 @@ This project now has a reviewer-visible flow for `pages_read_user_content`.
 - Messenger OAuth requests `pages_read_user_content`.
 - The dependency `pages_show_list` is already requested.
 - The app calls `GET /{page_id}/feed` after a Page is connected.
-- The Messenger dashboard shows the result in the Page User Content Review section.
+- The Messenger dashboard shows the result in the Facebook Comments Moderation section.
 
 ## App Review use case text
 
@@ -26,8 +26,10 @@ Record one continuous video:
 5. Select the Business Portfolio if Meta shows that step.
 6. Select the Facebook Page.
 7. Open `/dashboard/<page_id>`.
-8. Click `Load Latest Page Feed`.
-9. Show the app displaying feed items and recent comments loaded from Meta.
+8. Open the `Facebook Comments Moderation` section.
+9. Click `Refresh Page Data`.
+10. Show the app displaying the Facebook Page name, related post, comment text, comment author, and comment time.
+11. Show the assignment, status, sentiment, and follow-up controls on the comment item.
 
 ## Test setup checklist
 
@@ -36,6 +38,7 @@ Record one continuous video:
 - The selected Page has at least one feed item or comment that can appear in the dashboard.
 - The app has `pages_read_engagement`, `pages_read_user_content`, and `pages_show_list` in the OAuth scope.
 - The video, written use case, and live app all show the same feature.
+- Create a fresh Facebook comment before the video if you need to show newly synchronized data.
 
 ## Current implementation
 

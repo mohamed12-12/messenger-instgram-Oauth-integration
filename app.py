@@ -758,7 +758,7 @@ def get_page_assets_for_selected_business(user_access_token: str) -> list:
 
 def fetch_page_user_content(page_id: str, page_access_token: str) -> list:
     feed = graph_get(f'{page_id}/feed', {
-        'fields': 'id,message,story,created_time,from,permalink_url,comments.limit(3){id,message,from,created_time}',
+        'fields': 'id,message,story,created_time,from,permalink_url,comments.limit(25){id,message,from,created_time,permalink_url}',
         'limit': 10,
         'access_token': page_access_token
     })
@@ -771,7 +771,8 @@ def fetch_page_user_content(page_id: str, page_access_token: str) -> list:
                 'id': comment.get('id'),
                 'message': comment.get('message') or '',
                 'from_name': (comment.get('from') or {}).get('name') or 'Unknown',
-                'created_time': comment.get('created_time')
+                'created_time': comment.get('created_time'),
+                'permalink_url': comment.get('permalink_url')
             })
 
         items.append({
@@ -785,6 +786,42 @@ def fetch_page_user_content(page_id: str, page_access_token: str) -> list:
         })
 
     return items
+
+def build_page_comment_moderation_items(posts: list, page_id: str, page_name: str) -> list:
+    moderation_items = []
+    for post in posts:
+        post_text = post.get('message') or post.get('story') or '[no post text]'
+        for comment in post.get('comments', []):
+            moderation_items.append({
+                'page_id': page_id,
+                'page_name': page_name,
+                'post_id': post.get('id'),
+                'post_text': post_text,
+                'post_created_time': post.get('created_time'),
+                'post_permalink_url': post.get('permalink_url'),
+                'comment_id': comment.get('id'),
+                'comment_text': comment.get('message') or '[no comment text]',
+                'comment_author': comment.get('from_name') or 'Unknown',
+                'comment_created_time': comment.get('created_time'),
+                'comment_permalink_url': comment.get('permalink_url') or post.get('permalink_url'),
+                'status': 'Needs review',
+                'assigned_to': 'Unassigned',
+                'sentiment': classify_comment_sentiment(comment.get('message') or '')
+            })
+
+    moderation_items.sort(key=lambda item: item.get('comment_created_time') or '', reverse=True)
+    return moderation_items
+
+def classify_comment_sentiment(text: str) -> str:
+    lowered = text.lower()
+    negative_terms = ('bad', 'angry', 'hate', 'issue', 'problem', 'refund', 'broken', 'not working')
+    positive_terms = ('thanks', 'thank you', 'great', 'love', 'good', 'excellent', 'amazing')
+
+    if any(term in lowered for term in negative_terms):
+        return 'Negative'
+    if any(term in lowered for term in positive_terms):
+        return 'Positive'
+    return 'Neutral'
 
 def build_instagram_asset_options(pages: list) -> list:
     assets = []
@@ -2066,13 +2103,16 @@ def page_user_content_api():
 
     try:
         content = fetch_page_user_content(page_id, page_token)
+        page_name = get_saved_page_name(page_id) or f'Page {page_id}'
         return jsonify({
             'success': True,
             'page_id': page_id,
-            'page_name': get_saved_page_name(page_id) or f'Page {page_id}',
+            'page_name': page_name,
             'items': content,
+            'comments': build_page_comment_moderation_items(content, page_id, page_name),
             'permission_used': 'pages_read_user_content',
-            'graph_edge': f'/{page_id}/feed'
+            'graph_edge': f'/{page_id}/feed',
+            'synced_at': int(time.time())
         })
     except requests.HTTPError as e:
         message, status_code = format_graph_api_error(
