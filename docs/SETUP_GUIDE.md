@@ -77,6 +77,7 @@ Messenger flow requests:
 - `pages_manage_metadata`
 - `pages_read_engagement`
 - `pages_read_user_content`
+- `pages_manage_engagement`
 - `pages_show_list`
 - `business_management`
 
@@ -159,6 +160,7 @@ Use it to:
 - Send manual messages to a PSID
 - View recent page events
 - Refresh Facebook Page posts, comments, ratings/recommendations, and tagged posts for App Review testing of `pages_read_user_content`
+- Reply to and delete test comments for Page management review flows
 - Check page subscription and debug state
 
 ### Instagram messaging dashboard

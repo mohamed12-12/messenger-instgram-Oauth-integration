@@ -531,6 +531,57 @@
             background: #fecaca;
         }
 
+        .comment-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .reply-box {
+            border-top: 1px solid #e5e7eb;
+            margin-top: 12px;
+            padding-top: 12px;
+        }
+
+        .reply-box textarea {
+            border-radius: 10px;
+            font-size: 13px;
+            min-height: 72px;
+            padding: 10px;
+            resize: vertical;
+        }
+
+        .reply-comment-btn {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 10px;
+            color: #1d4ed8;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 8px 10px;
+        }
+
+        .reply-comment-btn:hover {
+            background: #dbeafe;
+        }
+
+        .comment-action-status {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.4;
+            margin-top: 8px;
+        }
+
+        .comment-action-status.is-error {
+            color: #991b1b;
+        }
+
+        .comment-action-status.is-success {
+            color: #166534;
+        }
+
         .simple-card {
             background: #f9fafb;
             border: 1px solid #e5e7eb;
@@ -933,13 +984,43 @@
                     wrapper.appendChild(link);
                 }
 
+                const actions = document.createElement('div');
+                actions.className = 'comment-actions';
+
                 const deleteButton = document.createElement('button');
                 deleteButton.type = 'button';
                 deleteButton.className = 'delete-comment-btn';
                 deleteButton.dataset.commentId = comment.comment_id || '';
                 setText(deleteButton, 'Delete comment');
                 deleteButton.onclick = () => deleteComment(comment.comment_id, wrapper);
-                wrapper.appendChild(deleteButton);
+                actions.appendChild(deleteButton);
+
+                wrapper.appendChild(actions);
+
+                const replyBox = document.createElement('div');
+                replyBox.className = 'reply-box';
+
+                const replyInput = document.createElement('textarea');
+                replyInput.maxLength = 1000;
+                replyInput.placeholder = 'Write a public Page reply to this comment...';
+
+                const replyActions = document.createElement('div');
+                replyActions.className = 'comment-actions';
+
+                const replyButton = document.createElement('button');
+                replyButton.type = 'button';
+                replyButton.className = 'reply-comment-btn';
+                setText(replyButton, 'Reply');
+
+                const replyStatus = document.createElement('div');
+                replyStatus.className = 'comment-action-status';
+
+                replyButton.onclick = () => replyToComment(comment.comment_id, replyInput, replyButton, replyStatus);
+                replyActions.appendChild(replyButton);
+                replyBox.appendChild(replyInput);
+                replyBox.appendChild(replyActions);
+                replyBox.appendChild(replyStatus);
+                wrapper.appendChild(replyBox);
 
                 pageCommentsFeed.appendChild(wrapper);
             });
@@ -1026,6 +1107,50 @@
                 }
             } catch (err) {
                 showUserContentResult(false, 'Meta API request failed. Please try again.');
+            }
+        }
+
+        async function replyToComment(commentId, input, button, statusEl) {
+            const message = (input.value || '').trim();
+            statusEl.className = 'comment-action-status';
+            setText(statusEl, '');
+
+            if (!commentId) {
+                statusEl.className = 'comment-action-status is-error';
+                setText(statusEl, 'No Facebook comment was selected.');
+                return;
+            }
+            if (!message) {
+                statusEl.className = 'comment-action-status is-error';
+                setText(statusEl, 'Reply message is required.');
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = 'Replying...';
+            try {
+                const response = await fetch('/api/page-user-comment/reply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ page_id: connectedPageId || '', comment_id: commentId, message })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    statusEl.className = 'comment-action-status is-error';
+                    setText(statusEl, data.error || 'Could not reply to the Facebook comment.');
+                    return;
+                }
+
+                input.value = '';
+                statusEl.className = 'comment-action-status is-success';
+                setText(statusEl, `Reply posted${data.reply_id ? ` (${data.reply_id})` : ''}.`);
+                showUserContentResult(true, 'Facebook comment reply posted.');
+            } catch (err) {
+                statusEl.className = 'comment-action-status is-error';
+                setText(statusEl, 'Meta API request failed. Please try again.');
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Reply';
             }
         }
 

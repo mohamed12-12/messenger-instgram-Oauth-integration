@@ -2,6 +2,8 @@
 
 This project now has a reviewer-visible flow for `pages_read_user_content`.
 
+Note: replying to comments uses `pages_manage_engagement`; `pages_read_user_content` is still used to read and display the user-generated Page content before the reply action.
+
 ## What changed
 
 - Messenger OAuth requests `pages_read_user_content`.
@@ -13,7 +15,7 @@ This project now has a reviewer-visible flow for `pages_read_user_content`.
 
 Use this in the `pages_read_user_content` permission request:
 
-> Nanovate uses `pages_read_user_content` to let an authorized Page admin view user-generated content for Page management. After the admin connects their Facebook Page, the app retrieves recent Page posts, user comments on those posts, Page ratings/recommendations, and posts that tag the Page. The dashboard displays the Page name, post context, comment author, comment text, comment time, ratings/recommendations, and tagged posts. The admin can also delete a user comment from a Page post when needed for Page management.
+> Nanovate uses `pages_read_user_content` to let an authorized Page admin view user-generated content for Page management. After the admin connects their Facebook Page, the app retrieves recent Page posts, user comments on those posts, Page ratings/recommendations, and posts that tag the Page. The dashboard displays the Page name, post context, comment author, comment text, comment time, ratings/recommendations, and tagged posts. The admin can also reply to or delete a user comment from a Page post when needed for Page management.
 
 ## Screencast steps
 
@@ -31,7 +33,8 @@ Record one continuous video:
 10. Click `Refresh Comments`.
 11. Show the app displaying Page posts, user comments, ratings/recommendations, and posts tagging the Page.
 12. Show a comment with Page name, related post, comment author, comment text, comment time, and comment ID.
-13. If safe for the test Page, click `Delete comment` on a test comment and show the success message.
+13. Type a short Page reply on a test comment, click `Reply`, and show the success message.
+14. If safe for the test Page, click `Delete comment` on a test comment and show the success message.
 
 ## Test setup checklist
 

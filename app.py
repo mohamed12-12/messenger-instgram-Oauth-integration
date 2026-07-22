@@ -59,7 +59,7 @@ GRAPH_VERSION = 'v22.0'
 GRAPH_BASE    = f'https://graph.facebook.com/{GRAPH_VERSION}'
 
 # OAuth scopes required by the app
-SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_read_user_content,pages_show_list,business_management'
+SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_read_user_content,pages_manage_engagement,pages_show_list,business_management'
 NO_BUSINESS_PORTFOLIO_MESSAGE = (
     'No Business Portfolio was returned by Meta for this user. '
     'Please set up a Business Manager / Business Portfolio first, make sure you are an admin, '
@@ -917,6 +917,15 @@ def try_fetch_page_section(fetcher, *args):
         logger.warning("Page user content section failed: %s", exc)
         return [], 'This section could not be loaded from Meta.'
 
+def get_connected_page_comment_ids(page_id: str, page_access_token: str) -> set:
+    page_name = get_saved_page_name(page_id) or f'Page {page_id}'
+    content = fetch_page_user_content(page_id, page_access_token)
+    return {
+        comment.get('comment_id')
+        for comment in build_page_comment_items(content, page_id, page_name)
+        if comment.get('comment_id')
+    }
+
 def fetch_page_picture_url(page_id: str, page_access_token: str) -> str:
     if not page_id or not page_access_token:
         return None
@@ -1113,6 +1122,7 @@ def meta_oauth_debug():
         'instagram_scopes': INSTAGRAM_SCOPES.split(','),
         'messenger_business_management_requested': 'business_management' in SCOPES.split(','),
         'messenger_pages_read_user_content_requested': 'pages_read_user_content' in SCOPES.split(','),
+        'messenger_pages_manage_engagement_requested': 'pages_manage_engagement' in SCOPES.split(','),
         'instagram_business_management_requested': 'business_management' in INSTAGRAM_SCOPES.split(','),
         'selected_business_id': business_id,
         'selected_business_name': business_name,
@@ -2281,11 +2291,7 @@ def delete_page_user_comment_api():
         return jsonify({'success': False, 'error': 'Facebook authorization has expired. Please reconnect your account.'}), 401
 
     try:
-        content = fetch_page_user_content(page_id, page_token)
-        allowed_comment_ids = {
-            comment.get('comment_id')
-            for comment in build_page_comment_items(content, page_id, get_saved_page_name(page_id) or f'Page {page_id}')
-        }
+        allowed_comment_ids = get_connected_page_comment_ids(page_id, page_token)
         if comment_id not in allowed_comment_ids:
             return jsonify({'success': False, 'error': 'This comment was not found on the connected Facebook Page.'}), 403
 
@@ -2304,6 +2310,54 @@ def delete_page_user_comment_api():
     except Exception:
         logger.exception("Deleting Page user comment failed for page %s.", page_id)
         return jsonify({'success': False, 'error': 'Could not delete the Facebook comment.'}), 500
+
+@app.route('/api/page-user-comment/reply', methods=['POST'])
+def reply_page_user_comment_api():
+    data = request.get_json(silent=True) or request.form
+    page_id = data.get('page_id') or session.get('connected_page_id')
+    comment_id = data.get('comment_id')
+    message = (data.get('message') or '').strip()
+    page_token = get_connected_page_token(page_id)
+    connected_session_page_id = session.get('connected_page_id')
+
+    if not page_id:
+        return jsonify({'success': False, 'error': 'No Facebook Page is connected. Please connect Facebook first.'}), 400
+    if connected_session_page_id and connected_session_page_id != page_id:
+        return jsonify({'success': False, 'error': 'This Facebook Page is not connected in your current session.'}), 403
+    if not comment_id:
+        return jsonify({'success': False, 'error': 'No Facebook comment was selected.'}), 400
+    if not message:
+        return jsonify({'success': False, 'error': 'Reply message is required.'}), 400
+    if len(message) > 1000:
+        return jsonify({'success': False, 'error': 'Reply message is too long.'}), 400
+    if not page_token:
+        return jsonify({'success': False, 'error': 'Facebook authorization has expired. Please reconnect your account.'}), 401
+
+    try:
+        allowed_comment_ids = get_connected_page_comment_ids(page_id, page_token)
+        if comment_id not in allowed_comment_ids:
+            return jsonify({'success': False, 'error': 'This comment was not found on the connected Facebook Page.'}), 403
+
+        result = graph_post(
+            f'{comment_id}/comments',
+            params={'access_token': page_token},
+            data={'message': message}
+        )
+        return jsonify({
+            'success': True,
+            'message': 'Facebook comment reply posted.',
+            'comment_id': comment_id,
+            'reply_id': result.get('id'),
+            'permission_used': 'pages_manage_engagement'
+        })
+    except requests.HTTPError as e:
+        message, status_code = format_graph_api_error(e, 'Could not reply to the Facebook comment.')
+        if status_code == 403:
+            message = 'Nanovate does not currently have permission to reply to Page comments.'
+        return jsonify({'success': False, 'error': message}), status_code
+    except Exception:
+        logger.exception("Replying to Page user comment failed for page %s.", page_id)
+        return jsonify({'success': False, 'error': 'Could not reply to the Facebook comment.'}), 500
 
 @app.route('/api/instagram-debug')
 def instagram_debug():
