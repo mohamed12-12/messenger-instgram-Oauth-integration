@@ -374,28 +374,95 @@
             font-size: 12px;
         }
 
-        .comments-list {
+        .content-stats {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            margin: 14px 0;
+        }
+
+        .stat-card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 12px;
+        }
+
+        .stat-value {
+            color: var(--text-main);
+            font-size: 20px;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .stat-label {
+            color: var(--text-sub);
+            font-size: 11px;
+            font-weight: 700;
+            margin-top: 6px;
+            text-transform: uppercase;
+        }
+
+        .content-grid {
+            display: grid;
+            gap: 14px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-top: 14px;
+        }
+
+        .content-panel {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: #fff;
+            overflow: hidden;
+        }
+
+        .content-panel summary {
+            align-items: center;
+            cursor: pointer;
             display: flex;
-            flex-direction: column;
+            justify-content: space-between;
             gap: 12px;
+            list-style: none;
+            padding: 14px;
         }
 
-        .content-section {
-            margin-top: 20px;
+        .content-panel summary::-webkit-details-marker {
+            display: none;
         }
 
-        .content-section h4 {
+        .section-title {
             color: var(--text-main);
             font-size: 14px;
-            margin-bottom: 10px;
+            font-weight: 800;
+        }
+
+        .section-count {
+            background: #eff6ff;
+            border-radius: 999px;
+            color: #1d4ed8;
+            font-size: 12px;
+            font-weight: 800;
+            padding: 4px 8px;
+            white-space: nowrap;
+        }
+
+        .items-list {
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 420px;
+            overflow: auto;
+            padding: 12px;
         }
 
         .comment-card {
             background: #f9fafb;
             border: 1px solid #e5e7eb;
             border-left: 4px solid var(--primary);
-            border-radius: 12px;
-            padding: 14px;
+            border-radius: 10px;
+            padding: 12px;
         }
 
         .comment-meta {
@@ -417,6 +484,18 @@
             font-size: 14px;
             line-height: 1.5;
             overflow-wrap: anywhere;
+        }
+
+        .text-clamp {
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .is-expanded .text-clamp {
+            display: block;
+            overflow: visible;
         }
 
         .post-context {
@@ -455,8 +534,8 @@
         .simple-card {
             background: #f9fafb;
             border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 14px;
+            border-radius: 10px;
+            padding: 12px;
         }
 
         .simple-title {
@@ -493,6 +572,52 @@
             font-size: 14px;
             padding: 18px;
             text-align: center;
+        }
+
+        .expand-btn {
+            background: transparent;
+            border: none;
+            color: var(--primary);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 8px;
+            padding: 0;
+        }
+
+        @media (max-width: 1100px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .content-stats,
+            .content-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding: 16px;
+            }
+
+            .card {
+                padding: 24px;
+            }
+
+            .comments-toolbar {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .content-stats,
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .items-list {
+                max-height: none;
+            }
         }
 
     </style>
@@ -566,21 +691,53 @@
                         Meta permission shown: <code>pages_read_user_content</code> reads Page posts, user comments, Page ratings/recommendations, and posts that tag this Page. It can also delete user comments on Page posts.
                     </div>
                     <div id="page-user-content-result" class="result-box"></div>
-                    <div class="content-section">
-                        <h4>Page Posts</h4>
-                        <div id="page-posts-feed" class="comments-list"></div>
+                    <div class="content-stats">
+                        <div class="stat-card">
+                            <div class="stat-value" id="posts-count">0</div>
+                            <div class="stat-label">Posts</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="comments-count">0</div>
+                            <div class="stat-label">Comments</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="ratings-count">0</div>
+                            <div class="stat-label">Ratings</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="tagged-count">0</div>
+                            <div class="stat-label">Tagged</div>
+                        </div>
                     </div>
-                    <div class="content-section">
-                        <h4>User Comments</h4>
-                        <div id="page-comments-feed" class="comments-list"></div>
-                    </div>
-                    <div class="content-section">
-                        <h4>Ratings / Recommendations</h4>
-                        <div id="page-ratings-feed" class="comments-list"></div>
-                    </div>
-                    <div class="content-section">
-                        <h4>Posts Tagging This Page</h4>
-                        <div id="page-tagged-feed" class="comments-list"></div>
+                    <div class="content-grid">
+                        <details class="content-panel" open>
+                            <summary>
+                                <span class="section-title">User Comments</span>
+                                <span class="section-count" id="comments-section-count">0</span>
+                            </summary>
+                            <div id="page-comments-feed" class="items-list"></div>
+                        </details>
+                        <details class="content-panel" open>
+                            <summary>
+                                <span class="section-title">Page Posts</span>
+                                <span class="section-count" id="posts-section-count">0</span>
+                            </summary>
+                            <div id="page-posts-feed" class="items-list"></div>
+                        </details>
+                        <details class="content-panel">
+                            <summary>
+                                <span class="section-title">Ratings / Recommendations</span>
+                                <span class="section-count" id="ratings-section-count">0</span>
+                            </summary>
+                            <div id="page-ratings-feed" class="items-list"></div>
+                        </details>
+                        <details class="content-panel">
+                            <summary>
+                                <span class="section-title">Posts Tagging This Page</span>
+                                <span class="section-count" id="tagged-section-count">0</span>
+                            </summary>
+                            <div id="page-tagged-feed" class="items-list"></div>
+                        </details>
                     </div>
                 </div>
             </div>
@@ -618,6 +775,16 @@
         const pageRatingsFeed = document.getElementById('page-ratings-feed');
         const pageTaggedFeed = document.getElementById('page-tagged-feed');
         const pageUserContentSync = document.getElementById('page-user-content-sync');
+        const countEls = {
+            posts: document.getElementById('posts-count'),
+            comments: document.getElementById('comments-count'),
+            ratings: document.getElementById('ratings-count'),
+            tagged: document.getElementById('tagged-count'),
+            postsSection: document.getElementById('posts-section-count'),
+            commentsSection: document.getElementById('comments-section-count'),
+            ratingsSection: document.getElementById('ratings-section-count'),
+            taggedSection: document.getElementById('tagged-section-count')
+        };
 
         function copyPSID(id) { document.getElementById('recipient_id').value = id; }
 
@@ -629,6 +796,42 @@
             pageUserContentResult.style.display = 'block';
             pageUserContentResult.className = `result-box ${success ? 'result-success' : 'result-error'}`;
             pageUserContentResult.textContent = message;
+        }
+
+        function updateCounts(data) {
+            const counts = {
+                posts: data.post_count || 0,
+                comments: data.comment_count || 0,
+                ratings: data.rating_count || 0,
+                tagged: data.tagged_post_count || 0
+            };
+            countEls.posts.textContent = counts.posts;
+            countEls.comments.textContent = counts.comments;
+            countEls.ratings.textContent = counts.ratings;
+            countEls.tagged.textContent = counts.tagged;
+            countEls.postsSection.textContent = counts.posts;
+            countEls.commentsSection.textContent = counts.comments;
+            countEls.ratingsSection.textContent = counts.ratings;
+            countEls.taggedSection.textContent = counts.tagged;
+        }
+
+        function addExpandableText(parent, className, text) {
+            const textEl = document.createElement('div');
+            textEl.className = `${className} text-clamp`;
+            setText(textEl, text);
+            parent.appendChild(textEl);
+
+            if ((text || '').length > 180) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'expand-btn';
+                setText(button, 'Show full text');
+                button.onclick = () => {
+                    parent.classList.toggle('is-expanded');
+                    setText(button, parent.classList.contains('is-expanded') ? 'Show less' : 'Show full text');
+                };
+                parent.appendChild(button);
+            }
         }
 
         function renderEmpty(container, message) {
@@ -651,13 +854,9 @@
             metaEl.className = 'simple-meta';
             setText(metaEl, meta);
 
-            const textEl = document.createElement('div');
-            textEl.className = 'simple-text';
-            setText(textEl, text);
-
             wrapper.appendChild(titleEl);
             wrapper.appendChild(metaEl);
-            wrapper.appendChild(textEl);
+            addExpandableText(wrapper, 'simple-text', text);
 
             if (linkUrl) {
                 const link = document.createElement('a');
@@ -712,10 +911,6 @@
                 const commentDate = comment.comment_created_time ? new Date(comment.comment_created_time).toLocaleString() : 'Unknown time';
                 setText(meta, `${commentDate} | Page: ${comment.page_name || 'Unknown Page'} | Comment ID: ${comment.comment_id || 'Unknown'}`);
 
-                const text = document.createElement('div');
-                text.className = 'comment-text';
-                setText(text, comment.comment_text || '[no comment text]');
-
                 const post = document.createElement('div');
                 post.className = 'post-context';
                 const shortPost = comment.post_text && comment.post_text.length > 140
@@ -725,7 +920,7 @@
 
                 wrapper.appendChild(author);
                 wrapper.appendChild(meta);
-                wrapper.appendChild(text);
+                addExpandableText(wrapper, 'comment-text', comment.comment_text || '[no comment text]');
                 wrapper.appendChild(post);
 
                 if (comment.comment_permalink_url) {
@@ -945,6 +1140,7 @@
             pageCommentsFeed.innerHTML = '';
             pageRatingsFeed.innerHTML = '';
             pageTaggedFeed.innerHTML = '';
+            updateCounts({});
             try {
                 const response = await fetch(`/api/page-user-content?page_id=${encodeURIComponent(connectedPageId || '')}`);
                 const data = await response.json();
@@ -956,6 +1152,7 @@
                 const syncedAt = data.synced_at ? new Date(data.synced_at * 1000).toLocaleString() : new Date().toLocaleString();
                 pageUserContentSync.textContent = `Last refreshed: ${syncedAt}`;
                 showUserContentResult(true, `Loaded ${data.post_count} post(s), ${data.comment_count} comment(s), ${data.rating_count} rating/recommendation item(s), and ${data.tagged_post_count} tagged post(s) for ${data.page_name}.`);
+                updateCounts(data);
                 renderPosts(data.posts || []);
                 renderComments(data.comments || []);
                 renderRatings(data.ratings || [], data.section_errors?.ratings);
