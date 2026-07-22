@@ -926,6 +926,77 @@ def get_connected_page_comment_ids(page_id: str, page_access_token: str) -> set:
         if comment.get('comment_id')
     }
 
+def fetch_page_engagement_summary(page_id: str, page_access_token: str) -> dict:
+    try:
+        page_info = graph_get(page_id, {
+            'fields': 'id,name,fan_count,followers_count,talking_about_count,link',
+            'access_token': page_access_token
+        })
+    except requests.HTTPError as exc:
+        logger.warning("Retrying Page engagement summary with basic fields for page %s: %s", page_id, exc)
+        page_info = graph_get(page_id, {
+            'fields': 'id,name,link',
+            'access_token': page_access_token
+        })
+
+    posts = graph_get(f'{page_id}/feed', {
+        'fields': 'id,message,story,created_time,permalink_url',
+        'limit': 10,
+        'access_token': page_access_token
+    }).get('data', [])
+
+    post_metrics = []
+    for post in posts:
+        post_id = post.get('id')
+        metrics = {
+            'post_id': post_id,
+            'post_text': post.get('message') or post.get('story') or '[no post text]',
+            'created_time': post.get('created_time'),
+            'permalink_url': post.get('permalink_url'),
+            'reaction_count': 0,
+            'comment_count': 0,
+            'share_count': 0,
+            'error': None
+        }
+        if post_id:
+            try:
+                engagement = graph_get(post_id, {
+                    'fields': 'reactions.limit(0).summary(total_count),comments.limit(0).summary(true),shares',
+                    'access_token': page_access_token
+                })
+                metrics['reaction_count'] = (
+                    (engagement.get('reactions') or {}).get('summary') or {}
+                ).get('total_count', 0)
+                metrics['comment_count'] = (
+                    (engagement.get('comments') or {}).get('summary') or {}
+                ).get('total_count', 0)
+                metrics['share_count'] = (engagement.get('shares') or {}).get('count', 0)
+            except requests.HTTPError as exc:
+                logger.warning("Could not fetch engagement metrics for post %s: %s", post_id, exc)
+                metrics['error'] = 'Post engagement metrics could not be loaded.'
+            except Exception as exc:
+                logger.warning("Could not fetch engagement metrics for post %s: %s", post_id, exc)
+                metrics['error'] = 'Post engagement metrics could not be loaded.'
+        post_metrics.append(metrics)
+
+    return {
+        'page': {
+            'id': page_info.get('id') or page_id,
+            'name': page_info.get('name') or get_saved_page_name(page_id) or f'Page {page_id}',
+            'link': page_info.get('link'),
+            'fan_count': page_info.get('fan_count'),
+            'followers_count': page_info.get('followers_count'),
+            'talking_about_count': page_info.get('talking_about_count')
+        },
+        'posts': post_metrics,
+        'totals': {
+            'posts_checked': len(post_metrics),
+            'reactions': sum(item.get('reaction_count') or 0 for item in post_metrics),
+            'comments': sum(item.get('comment_count') or 0 for item in post_metrics),
+            'shares': sum(item.get('share_count') or 0 for item in post_metrics)
+        }
+    }
+
 def fetch_page_picture_url(page_id: str, page_access_token: str) -> str:
     if not page_id or not page_access_token:
         return None
@@ -2317,6 +2388,38 @@ def publish_page_post_api():
     except Exception:
         logger.exception("Publishing Page post failed for page %s.", page_id)
         return jsonify({'success': False, 'error': 'Could not publish the Facebook Page post.'}), 500
+
+@app.route('/api/page-engagement')
+def page_engagement_api():
+    page_id = request.args.get('page_id') or session.get('connected_page_id')
+    page_token = get_connected_page_token(page_id)
+    connected_session_page_id = session.get('connected_page_id')
+
+    if not page_id:
+        return jsonify({'success': False, 'error': 'No Facebook Page is connected. Please connect Facebook first.'}), 400
+    if connected_session_page_id and connected_session_page_id != page_id:
+        return jsonify({'success': False, 'error': 'This Facebook Page is not connected in your current session.'}), 403
+    if not page_token:
+        return jsonify({'success': False, 'error': 'Facebook authorization has expired. Please reconnect your account.'}), 401
+
+    try:
+        engagement = fetch_page_engagement_summary(page_id, page_token)
+        return jsonify({
+            'success': True,
+            'page_id': page_id,
+            'page_name': engagement['page']['name'],
+            'engagement': engagement,
+            'permission_used': 'pages_read_engagement',
+            'synced_at': int(time.time())
+        })
+    except requests.HTTPError as e:
+        message, status_code = format_graph_api_error(e, 'Could not read Facebook Page engagement.')
+        if status_code == 403:
+            message = 'Nanovate does not currently have permission to retrieve Page engagement.'
+        return jsonify({'success': False, 'error': message, 'permission_used': 'pages_read_engagement'}), status_code
+    except Exception:
+        logger.exception("Reading Page engagement failed for page %s.", page_id)
+        return jsonify({'success': False, 'error': 'Could not read Facebook Page engagement.', 'permission_used': 'pages_read_engagement'}), 500
 
 @app.route('/api/page-user-comment/delete', methods=['POST'])
 def delete_page_user_comment_api():

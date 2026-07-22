@@ -419,6 +419,53 @@
             font-size: 12px;
         }
 
+        .engagement-panel {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            margin: 18px 0;
+            padding: 14px;
+        }
+
+        .engagement-header {
+            align-items: flex-start;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: space-between;
+        }
+
+        .engagement-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 12px;
+        }
+
+        .engagement-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .engagement-row {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 12px;
+        }
+
+        .engagement-metrics {
+            color: #374151;
+            display: flex;
+            flex-wrap: wrap;
+            font-size: 12px;
+            font-weight: 700;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
         .content-stats {
             display: grid;
             gap: 10px;
@@ -687,6 +734,7 @@
             }
 
             .content-stats,
+            .engagement-grid,
             .content-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
@@ -707,6 +755,7 @@
             }
 
             .content-stats,
+            .engagement-grid,
             .content-grid {
                 grid-template-columns: 1fr;
             }
@@ -798,6 +847,45 @@
                         </div>
                         <div id="page-post-result" class="result-box"></div>
                     </div>
+                    <div class="engagement-panel">
+                        <div class="engagement-header">
+                            <div>
+                                <h3>Page Engagement</h3>
+                                <p class="hint">Meta permission shown: <code>pages_read_engagement</code> reads Page metadata and post engagement counts.</p>
+                            </div>
+                            <button type="button" class="btn-tool" id="load-page-engagement">
+                                Refresh Engagement
+                            </button>
+                        </div>
+                        <div id="page-engagement-result" class="result-box"></div>
+                        <div class="engagement-grid">
+                            <div class="stat-card">
+                                <div class="stat-value" id="page-followers-count">0</div>
+                                <div class="stat-label">Followers</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="page-fans-count">0</div>
+                                <div class="stat-label">Page Likes</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="page-talking-count">0</div>
+                                <div class="stat-label">Talking About</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="post-reactions-count">0</div>
+                                <div class="stat-label">Post Reactions</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="post-comments-count">0</div>
+                                <div class="stat-label">Post Comments</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="post-shares-count">0</div>
+                                <div class="stat-label">Post Shares</div>
+                            </div>
+                        </div>
+                        <div id="page-engagement-list" class="engagement-list"></div>
+                    </div>
                     <div id="page-user-content-result" class="result-box"></div>
                     <div class="content-stats">
                         <div class="stat-card">
@@ -887,6 +975,17 @@
         const pagePostCount = document.getElementById('page-post-count');
         const publishPagePostBtn = document.getElementById('publish-page-post');
         const pagePostResult = document.getElementById('page-post-result');
+        const loadPageEngagementBtn = document.getElementById('load-page-engagement');
+        const pageEngagementResult = document.getElementById('page-engagement-result');
+        const pageEngagementList = document.getElementById('page-engagement-list');
+        const engagementCountEls = {
+            followers: document.getElementById('page-followers-count'),
+            fans: document.getElementById('page-fans-count'),
+            talking: document.getElementById('page-talking-count'),
+            reactions: document.getElementById('post-reactions-count'),
+            comments: document.getElementById('post-comments-count'),
+            shares: document.getElementById('post-shares-count')
+        };
         const countEls = {
             posts: document.getElementById('posts-count'),
             comments: document.getElementById('comments-count'),
@@ -925,6 +1024,76 @@
                 pagePostResult.appendChild(document.createElement('br'));
                 pagePostResult.appendChild(link);
             }
+        }
+
+        function showEngagementResult(success, message) {
+            pageEngagementResult.style.display = 'block';
+            pageEngagementResult.className = `result-box ${success ? 'result-success' : 'result-error'}`;
+            pageEngagementResult.textContent = message;
+        }
+
+        function formatCount(value) {
+            if (value === null || value === undefined) {
+                return 'N/A';
+            }
+            return String(value);
+        }
+
+        function updateEngagementCounts(data) {
+            const page = data.engagement?.page || {};
+            const totals = data.engagement?.totals || {};
+            engagementCountEls.followers.textContent = formatCount(page.followers_count);
+            engagementCountEls.fans.textContent = formatCount(page.fan_count);
+            engagementCountEls.talking.textContent = formatCount(page.talking_about_count);
+            engagementCountEls.reactions.textContent = formatCount(totals.reactions || 0);
+            engagementCountEls.comments.textContent = formatCount(totals.comments || 0);
+            engagementCountEls.shares.textContent = formatCount(totals.shares || 0);
+        }
+
+        function renderEngagementPosts(posts) {
+            pageEngagementList.innerHTML = '';
+            if (!posts.length) {
+                renderEmpty(pageEngagementList, 'No recent Page posts were found for engagement.');
+                return;
+            }
+
+            posts.forEach(post => {
+                const row = document.createElement('div');
+                row.className = 'engagement-row';
+
+                const meta = document.createElement('div');
+                meta.className = 'simple-meta';
+                const created = post.created_time ? new Date(post.created_time).toLocaleString() : 'Unknown time';
+                setText(meta, `${created} | Post ID: ${post.post_id || 'Unknown'}`);
+
+                addExpandableText(row, 'simple-text', post.post_text || '[no post text]');
+
+                const metrics = document.createElement('div');
+                metrics.className = 'engagement-metrics';
+                setText(metrics, `Reactions: ${post.reaction_count || 0} | Comments: ${post.comment_count || 0} | Shares: ${post.share_count || 0}`);
+
+                row.insertBefore(meta, row.firstChild);
+                row.appendChild(metrics);
+
+                if (post.error) {
+                    const warning = document.createElement('div');
+                    warning.className = 'section-warning';
+                    setText(warning, post.error);
+                    row.appendChild(warning);
+                }
+
+                if (post.permalink_url) {
+                    const link = document.createElement('a');
+                    link.className = 'comment-link';
+                    link.href = post.permalink_url;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    setText(link, 'Open post on Facebook');
+                    row.appendChild(link);
+                }
+
+                pageEngagementList.appendChild(row);
+            });
         }
 
         function updateCounts(data) {
@@ -1370,6 +1539,29 @@
             } finally {
                 publishPagePostBtn.disabled = false;
                 publishPagePostBtn.textContent = 'Publish Post';
+            }
+        };
+
+        loadPageEngagementBtn.onclick = async () => {
+            loadPageEngagementBtn.disabled = true;
+            loadPageEngagementBtn.textContent = 'Loading...';
+            pageEngagementList.innerHTML = '';
+            try {
+                const response = await fetch(`/api/page-engagement?page_id=${encodeURIComponent(connectedPageId || '')}`);
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showEngagementResult(false, data.error || 'Could not read Facebook Page engagement.');
+                    return;
+                }
+
+                updateEngagementCounts(data);
+                renderEngagementPosts(data.engagement?.posts || []);
+                showEngagementResult(true, `Loaded engagement for ${data.page_name}.`);
+            } catch (err) {
+                showEngagementResult(false, 'Meta API request failed. Please try again.');
+            } finally {
+                loadPageEngagementBtn.disabled = false;
+                loadPageEngagementBtn.textContent = 'Refresh Engagement';
             }
         };
 

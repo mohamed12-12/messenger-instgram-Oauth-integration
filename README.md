@@ -133,6 +133,7 @@ The other URL-style env vars are documentation-friendly deployment references fo
 6. Open `/dashboard/<page_id>` to manage that page
 7. Use `Refresh Comments` to show the `pages_read_user_content` review flow
 8. Use `Publish Post` to show the `pages_manage_posts` review flow
+9. Use `Refresh Engagement` to show the `pages_read_engagement` review flow
 
 ### Instagram connection flow
 
