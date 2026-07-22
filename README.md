@@ -131,6 +131,7 @@ The other URL-style env vars are documentation-friendly deployment references fo
 4. Select the page returned by Meta
 5. The app stores the page token and subscribes the page to webhooks
 6. Open `/dashboard/<page_id>` to manage that page
+7. Use `Load Latest Page Feed` to show the `pages_read_user_content` review flow
 
 ### Instagram connection flow
 

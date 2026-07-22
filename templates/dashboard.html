@@ -272,6 +272,77 @@
             font-size: 14px;
         }
 
+        .content-review {
+            margin-top: 28px;
+            padding-top: 24px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .content-review h3 {
+            color: var(--text-main);
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .content-review .hint {
+            color: var(--text-sub);
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+
+        .content-feed {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .content-item {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .content-item .content-meta {
+            color: #6b7280;
+            font-size: 11px;
+            margin-bottom: 6px;
+        }
+
+        .content-item .content-text {
+            color: #1f2937;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        .content-comments {
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 10px;
+        }
+
+        .content-comment {
+            color: #4b5563;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+
+        .content-link {
+            color: var(--primary);
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 10px;
+            text-decoration: none;
+        }
+
     </style>
 </head>
 
@@ -309,6 +380,18 @@
                 </form>
 
                 <div id="result" class="result-box"></div>
+
+                <div class="content-review">
+                    <h3>Page User Content Review</h3>
+                    <p class="hint">
+                        Loads recent Page feed items and comments from Meta using the approved Page token.
+                    </p>
+                    <button type="button" class="btn-tool" id="load-user-content">
+                        Load Latest Page Feed
+                    </button>
+                    <div id="page-user-content-result" class="result-box"></div>
+                    <div id="page-user-content-feed" class="content-feed"></div>
+                </div>
             </div>
         </div>
 
@@ -337,8 +420,74 @@
         const feed = document.getElementById('msg-feed');
         const connectedPageId = {{ page_id|tojson }};
         const debugBox = document.getElementById('debug-box');
+        const loadUserContentBtn = document.getElementById('load-user-content');
+        const pageUserContentResult = document.getElementById('page-user-content-result');
+        const pageUserContentFeed = document.getElementById('page-user-content-feed');
 
         function copyPSID(id) { document.getElementById('recipient_id').value = id; }
+
+        function setText(el, value) {
+            el.textContent = value || '';
+        }
+
+        function showUserContentResult(success, message) {
+            pageUserContentResult.style.display = 'block';
+            pageUserContentResult.className = `result-box ${success ? 'result-success' : 'result-error'}`;
+            pageUserContentResult.textContent = message;
+        }
+
+        function renderPageUserContent(items) {
+            pageUserContentFeed.innerHTML = '';
+
+            if (!items.length) {
+                const empty = document.createElement('div');
+                empty.className = 'content-item';
+                setText(empty, 'No Page feed items were returned for this Page.');
+                pageUserContentFeed.appendChild(empty);
+                return;
+            }
+
+            items.forEach(item => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'content-item';
+
+                const meta = document.createElement('div');
+                meta.className = 'content-meta';
+                const created = item.created_time ? new Date(item.created_time).toLocaleString() : 'Unknown time';
+                setText(meta, `${item.from_name || 'Unknown'} | ${created} | ${item.id || 'No ID'}`);
+
+                const text = document.createElement('div');
+                text.className = 'content-text';
+                setText(text, item.message || item.story || '[no message text]');
+
+                wrapper.appendChild(meta);
+                wrapper.appendChild(text);
+
+                if (item.permalink_url) {
+                    const link = document.createElement('a');
+                    link.className = 'content-link';
+                    link.href = item.permalink_url;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    setText(link, 'Open on Facebook');
+                    wrapper.appendChild(link);
+                }
+
+                if (item.comments?.length) {
+                    const comments = document.createElement('div');
+                    comments.className = 'content-comments';
+                    item.comments.forEach(comment => {
+                        const row = document.createElement('div');
+                        row.className = 'content-comment';
+                        setText(row, `${comment.from_name || 'Unknown'}: ${comment.message || '[no comment text]'}`);
+                        comments.appendChild(row);
+                    });
+                    wrapper.appendChild(comments);
+                }
+
+                pageUserContentFeed.appendChild(wrapper);
+            });
+        }
 
         async function updateFeed() {
             try {
@@ -443,6 +592,28 @@
                 btn.innerHTML = 'Send Message Now';
             }
         }
+
+        loadUserContentBtn.onclick = async () => {
+            loadUserContentBtn.disabled = true;
+            loadUserContentBtn.textContent = 'Loading...';
+            pageUserContentFeed.innerHTML = '';
+            try {
+                const response = await fetch(`/api/page-user-content?page_id=${encodeURIComponent(connectedPageId || '')}`);
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showUserContentResult(false, data.error || 'Could not load Page user content.');
+                    return;
+                }
+
+                showUserContentResult(true, `Loaded ${data.items.length} feed item(s) through ${data.permission_used}.`);
+                renderPageUserContent(data.items || []);
+            } catch (err) {
+                showUserContentResult(false, err.message);
+            } finally {
+                loadUserContentBtn.disabled = false;
+                loadUserContentBtn.textContent = 'Load Latest Page Feed';
+            }
+        };
     </script>
 </body>
 

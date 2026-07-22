@@ -59,7 +59,7 @@ GRAPH_VERSION = 'v22.0'
 GRAPH_BASE    = f'https://graph.facebook.com/{GRAPH_VERSION}'
 
 # OAuth scopes required by the app
-SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_show_list,business_management'
+SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_read_user_content,pages_show_list,business_management'
 NO_BUSINESS_PORTFOLIO_MESSAGE = (
     'No Business Portfolio was returned by Meta for this user. '
     'Please set up a Business Manager / Business Portfolio first, make sure you are an admin, '
@@ -756,6 +756,36 @@ def get_page_assets_for_selected_business(user_access_token: str) -> list:
             page['access_token'] = pages_with_tokens[page.get('id')].get('access_token')
     return business_pages
 
+def fetch_page_user_content(page_id: str, page_access_token: str) -> list:
+    feed = graph_get(f'{page_id}/feed', {
+        'fields': 'id,message,story,created_time,from,permalink_url,comments.limit(3){id,message,from,created_time}',
+        'limit': 10,
+        'access_token': page_access_token
+    })
+
+    items = []
+    for post in feed.get('data', []):
+        comments = []
+        for comment in post.get('comments', {}).get('data', []):
+            comments.append({
+                'id': comment.get('id'),
+                'message': comment.get('message') or '',
+                'from_name': (comment.get('from') or {}).get('name') or 'Unknown',
+                'created_time': comment.get('created_time')
+            })
+
+        items.append({
+            'id': post.get('id'),
+            'message': post.get('message') or '',
+            'story': post.get('story') or '',
+            'from_name': (post.get('from') or {}).get('name') or 'Unknown',
+            'created_time': post.get('created_time'),
+            'permalink_url': post.get('permalink_url'),
+            'comments': comments
+        })
+
+    return items
+
 def build_instagram_asset_options(pages: list) -> list:
     assets = []
     for page in pages:
@@ -936,6 +966,7 @@ def meta_oauth_debug():
         'messenger_scopes': SCOPES.split(','),
         'instagram_scopes': INSTAGRAM_SCOPES.split(','),
         'messenger_business_management_requested': 'business_management' in SCOPES.split(','),
+        'messenger_pages_read_user_content_requested': 'pages_read_user_content' in SCOPES.split(','),
         'instagram_business_management_requested': 'business_management' in INSTAGRAM_SCOPES.split(','),
         'selected_business_id': business_id,
         'selected_business_name': business_name,
@@ -2022,6 +2053,41 @@ def messenger_debug():
         debug_info['subscription_error'] = str(e)
 
     return jsonify(debug_info)
+
+@app.route('/api/page-user-content')
+def page_user_content_api():
+    page_id = request.args.get('page_id') or session.get('connected_page_id')
+    page_token = get_connected_page_token(page_id)
+
+    if not page_id:
+        return jsonify({'success': False, 'error': 'No connected page_id was provided.'}), 400
+    if not page_token:
+        return jsonify({'success': False, 'error': 'No connected page token found. Please reconnect the page.'}), 401
+
+    try:
+        content = fetch_page_user_content(page_id, page_token)
+        return jsonify({
+            'success': True,
+            'page_id': page_id,
+            'page_name': get_saved_page_name(page_id) or f'Page {page_id}',
+            'items': content,
+            'permission_used': 'pages_read_user_content',
+            'graph_edge': f'/{page_id}/feed'
+        })
+    except requests.HTTPError as e:
+        message, status_code = format_graph_api_error(
+            e,
+            'Could not read Page user content from Meta.'
+        )
+        return jsonify({
+            'success': False,
+            'error': message,
+            'permission_used': 'pages_read_user_content',
+            'raw_graph_error': extract_graph_api_error_payload(e)
+        }), status_code
+    except Exception:
+        logger.exception("Reading Page user content failed for page %s.", page_id)
+        return jsonify({'success': False, 'error': 'Could not read Page user content.'}), 500
 
 @app.route('/api/instagram-debug')
 def instagram_debug():

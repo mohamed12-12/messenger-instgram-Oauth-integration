@@ -76,7 +76,9 @@ Messenger flow requests:
 - `pages_messaging`
 - `pages_manage_metadata`
 - `pages_read_engagement`
+- `pages_read_user_content`
 - `pages_show_list`
+- `business_management`
 
 Instagram flow requests:
 
@@ -156,6 +158,7 @@ Use it to:
 
 - Send manual messages to a PSID
 - View recent page events
+- Load recent Page feed content and comments for App Review testing of `pages_read_user_content`
 - Check page subscription and debug state
 
 ### Instagram messaging dashboard

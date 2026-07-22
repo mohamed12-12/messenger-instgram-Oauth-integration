@@ -48,6 +48,27 @@ Purpose:
 
 ## Messaging Actions
 
+### Page user content review
+
+- `GET /api/page-user-content?page_id=<page_id>`
+
+Purpose:
+
+- reads recent Page feed items and recent comments through the connected Page token
+- demonstrates the `pages_read_user_content` permission for Meta App Review
+
+Success response:
+
+```json
+{
+  "success": true,
+  "page_id": "...",
+  "permission_used": "pages_read_user_content",
+  "graph_edge": "/<page_id>/feed",
+  "items": []
+}
+```
+
 ### Messenger manual send
 
 - `POST /send-message`
