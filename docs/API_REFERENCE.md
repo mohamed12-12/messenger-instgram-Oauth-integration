@@ -51,12 +51,14 @@ Purpose:
 ### Page user content review
 
 - `GET /api/page-user-content?page_id=<page_id>`
+- `POST /api/page-posts/publish`
 - `POST /api/page-user-comment/reply`
 - `POST /api/page-user-comment/delete`
 
 Purpose:
 
 - reads recent Page posts, user comments, ratings/recommendations, and tagged posts through the connected Page token
+- publishes a text post to the connected Facebook Page
 - returns simple records with Page, post, author, text, time, and identifiers
 - replies to a selected user comment after verifying it belongs to the connected Page
 - deletes a selected user comment after verifying it belongs to the connected Page

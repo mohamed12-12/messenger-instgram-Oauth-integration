@@ -78,6 +78,7 @@ Messenger flow requests:
 - `pages_read_engagement`
 - `pages_read_user_content`
 - `pages_manage_engagement`
+- `pages_manage_posts`
 - `pages_show_list`
 - `business_management`
 
@@ -160,6 +161,7 @@ Use it to:
 - Send manual messages to a PSID
 - View recent page events
 - Refresh Facebook Page posts, comments, ratings/recommendations, and tagged posts for App Review testing of `pages_read_user_content`
+- Publish a test Facebook Page post for App Review testing of `pages_manage_posts`
 - Reply to and delete test comments for Page management review flows
 - Check page subscription and debug state
 

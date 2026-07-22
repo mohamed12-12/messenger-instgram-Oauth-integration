@@ -59,7 +59,7 @@ GRAPH_VERSION = 'v22.0'
 GRAPH_BASE    = f'https://graph.facebook.com/{GRAPH_VERSION}'
 
 # OAuth scopes required by the app
-SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_read_user_content,pages_manage_engagement,pages_show_list,business_management'
+SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_read_user_content,pages_manage_engagement,pages_manage_posts,pages_show_list,business_management'
 NO_BUSINESS_PORTFOLIO_MESSAGE = (
     'No Business Portfolio was returned by Meta for this user. '
     'Please set up a Business Manager / Business Portfolio first, make sure you are an admin, '
@@ -1123,6 +1123,7 @@ def meta_oauth_debug():
         'messenger_business_management_requested': 'business_management' in SCOPES.split(','),
         'messenger_pages_read_user_content_requested': 'pages_read_user_content' in SCOPES.split(','),
         'messenger_pages_manage_engagement_requested': 'pages_manage_engagement' in SCOPES.split(','),
+        'messenger_pages_manage_posts_requested': 'pages_manage_posts' in SCOPES.split(','),
         'instagram_business_management_requested': 'business_management' in INSTAGRAM_SCOPES.split(','),
         'selected_business_id': business_id,
         'selected_business_name': business_name,
@@ -2272,6 +2273,50 @@ def page_user_content_api():
             'error': 'Could not read Page user content.',
             'permission_used': 'pages_read_user_content'
         }), 500
+
+@app.route('/api/page-posts/publish', methods=['POST'])
+def publish_page_post_api():
+    data = request.get_json(silent=True) or request.form
+    page_id = data.get('page_id') or session.get('connected_page_id')
+    message = (data.get('message') or '').strip()
+    page_token = get_connected_page_token(page_id)
+    connected_session_page_id = session.get('connected_page_id')
+
+    if not page_id:
+        return jsonify({'success': False, 'error': 'No Facebook Page is connected. Please connect Facebook first.'}), 400
+    if connected_session_page_id and connected_session_page_id != page_id:
+        return jsonify({'success': False, 'error': 'This Facebook Page is not connected in your current session.'}), 403
+    if not message:
+        return jsonify({'success': False, 'error': 'Post message is required.'}), 400
+    if len(message) > 5000:
+        return jsonify({'success': False, 'error': 'Post message is too long.'}), 400
+    if not page_token:
+        return jsonify({'success': False, 'error': 'Facebook authorization has expired. Please reconnect your account.'}), 401
+
+    try:
+        result = graph_post(
+            f'{page_id}/feed',
+            params={'access_token': page_token},
+            data={'message': message}
+        )
+        post_id = result.get('id')
+        return jsonify({
+            'success': True,
+            'message': 'Facebook Page post published.',
+            'page_id': page_id,
+            'page_name': get_saved_page_name(page_id) or f'Page {page_id}',
+            'post_id': post_id,
+            'post_url': f'https://www.facebook.com/{post_id}' if post_id else None,
+            'permission_used': 'pages_manage_posts'
+        })
+    except requests.HTTPError as e:
+        message, status_code = format_graph_api_error(e, 'Could not publish the Facebook Page post.')
+        if status_code == 403:
+            message = 'Nanovate does not currently have permission to publish Page posts.'
+        return jsonify({'success': False, 'error': message}), status_code
+    except Exception:
+        logger.exception("Publishing Page post failed for page %s.", page_id)
+        return jsonify({'success': False, 'error': 'Could not publish the Facebook Page post.'}), 500
 
 @app.route('/api/page-user-comment/delete', methods=['POST'])
 def delete_page_user_comment_api():

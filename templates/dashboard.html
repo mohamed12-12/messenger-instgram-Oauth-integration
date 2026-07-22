@@ -374,6 +374,51 @@
             font-size: 12px;
         }
 
+        .post-composer {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            margin: 18px 0;
+            padding: 14px;
+        }
+
+        .post-composer textarea {
+            border-radius: 10px;
+            font-size: 14px;
+            min-height: 110px;
+            padding: 12px;
+            resize: vertical;
+        }
+
+        .composer-actions {
+            align-items: center;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: space-between;
+            margin-top: 12px;
+        }
+
+        .publish-post-btn {
+            background: var(--primary);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 800;
+            padding: 11px 14px;
+        }
+
+        .publish-post-btn:hover {
+            background: #166fe5;
+        }
+
+        .char-count {
+            color: var(--text-sub);
+            font-size: 12px;
+        }
+
         .content-stats {
             display: grid;
             gap: 10px;
@@ -741,6 +786,18 @@
                     <div class="review-note">
                         Meta permission shown: <code>pages_read_user_content</code> reads Page posts, user comments, Page ratings/recommendations, and posts that tag this Page. It can also delete user comments on Page posts.
                     </div>
+                    <div class="post-composer">
+                        <h3>Create Page Post</h3>
+                        <p class="hint">Meta permission shown: <code>pages_manage_posts</code> publishes a text post to the connected Facebook Page.</p>
+                        <textarea id="page-post-message" maxlength="5000" placeholder="Write a test post for the Meta review video..."></textarea>
+                        <div class="composer-actions">
+                            <button type="button" class="publish-post-btn" id="publish-page-post">
+                                Publish Post
+                            </button>
+                            <span class="char-count" id="page-post-count">0 / 5000</span>
+                        </div>
+                        <div id="page-post-result" class="result-box"></div>
+                    </div>
                     <div id="page-user-content-result" class="result-box"></div>
                     <div class="content-stats">
                         <div class="stat-card">
@@ -826,6 +883,10 @@
         const pageRatingsFeed = document.getElementById('page-ratings-feed');
         const pageTaggedFeed = document.getElementById('page-tagged-feed');
         const pageUserContentSync = document.getElementById('page-user-content-sync');
+        const pagePostMessage = document.getElementById('page-post-message');
+        const pagePostCount = document.getElementById('page-post-count');
+        const publishPagePostBtn = document.getElementById('publish-page-post');
+        const pagePostResult = document.getElementById('page-post-result');
         const countEls = {
             posts: document.getElementById('posts-count'),
             comments: document.getElementById('comments-count'),
@@ -847,6 +908,23 @@
             pageUserContentResult.style.display = 'block';
             pageUserContentResult.className = `result-box ${success ? 'result-success' : 'result-error'}`;
             pageUserContentResult.textContent = message;
+        }
+
+        function showPagePostResult(success, message, postUrl) {
+            pagePostResult.style.display = 'block';
+            pagePostResult.className = `result-box ${success ? 'result-success' : 'result-error'}`;
+            pagePostResult.textContent = message;
+
+            if (success && postUrl) {
+                const link = document.createElement('a');
+                link.className = 'comment-link';
+                link.href = postUrl;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                setText(link, 'Open published post on Facebook');
+                pagePostResult.appendChild(document.createElement('br'));
+                pagePostResult.appendChild(link);
+            }
         }
 
         function updateCounts(data) {
@@ -1257,6 +1335,43 @@
                 btn.innerHTML = 'Send Message Now';
             }
         }
+
+        pagePostMessage.oninput = () => {
+            pagePostCount.textContent = `${pagePostMessage.value.length} / 5000`;
+        };
+
+        publishPagePostBtn.onclick = async () => {
+            const message = (pagePostMessage.value || '').trim();
+            if (!message) {
+                showPagePostResult(false, 'Post message is required.');
+                return;
+            }
+
+            publishPagePostBtn.disabled = true;
+            publishPagePostBtn.textContent = 'Publishing...';
+            try {
+                const response = await fetch('/api/page-posts/publish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ page_id: connectedPageId || '', message })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showPagePostResult(false, data.error || 'Could not publish the Facebook Page post.');
+                    return;
+                }
+
+                pagePostMessage.value = '';
+                pagePostCount.textContent = '0 / 5000';
+                showPagePostResult(true, `Published post ${data.post_id || ''} to ${data.page_name}.`, data.post_url);
+                loadUserContentBtn.click();
+            } catch (err) {
+                showPagePostResult(false, 'Meta API request failed. Please try again.');
+            } finally {
+                publishPagePostBtn.disabled = false;
+                publishPagePostBtn.textContent = 'Publish Post';
+            }
+        };
 
         loadUserContentBtn.onclick = async () => {
             loadUserContentBtn.disabled = true;
