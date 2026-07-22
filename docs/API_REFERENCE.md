@@ -55,7 +55,7 @@ Purpose:
 Purpose:
 
 - reads recent Page feed items and recent comments through the connected Page token
-- returns moderation-ready comment records with Page, post, author, comment, time, assignment status, and sentiment
+- returns simple comment records with Page, post, author, comment text, comment time, and identifiers
 - demonstrates the `pages_read_user_content` permission for Meta App Review
 
 Success response:
@@ -66,7 +66,8 @@ Success response:
   "page_id": "...",
   "permission_used": "pages_read_user_content",
   "graph_edge": "/<page_id>/feed",
-  "items": [],
+  "post_count": 0,
+  "comment_count": 0,
   "comments": []
 }
 ```

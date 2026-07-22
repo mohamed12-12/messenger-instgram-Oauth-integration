@@ -821,12 +821,12 @@ def fetch_page_user_content(page_id: str, page_access_token: str) -> list:
 
     return items
 
-def build_page_comment_moderation_items(posts: list, page_id: str, page_name: str) -> list:
-    moderation_items = []
+def build_page_comment_items(posts: list, page_id: str, page_name: str) -> list:
+    comment_items = []
     for post in posts:
         post_text = post.get('message') or post.get('story') or '[no post text]'
         for comment in post.get('comments', []):
-            moderation_items.append({
+            comment_items.append({
                 'page_id': page_id,
                 'page_name': page_name,
                 'post_id': post.get('id'),
@@ -837,25 +837,26 @@ def build_page_comment_moderation_items(posts: list, page_id: str, page_name: st
                 'comment_text': comment.get('message') or '[no comment text]',
                 'comment_author': comment.get('from_name') or 'Unknown',
                 'comment_created_time': comment.get('created_time'),
-                'comment_permalink_url': comment.get('permalink_url') or post.get('permalink_url'),
-                'status': 'Needs review',
-                'assigned_to': 'Unassigned',
-                'sentiment': classify_comment_sentiment(comment.get('message') or '')
+                'comment_permalink_url': comment.get('permalink_url') or post.get('permalink_url')
             })
 
-    moderation_items.sort(key=lambda item: item.get('comment_created_time') or '', reverse=True)
-    return moderation_items
+    comment_items.sort(key=lambda item: item.get('comment_created_time') or '', reverse=True)
+    return comment_items[:25]
 
-def classify_comment_sentiment(text: str) -> str:
-    lowered = text.lower()
-    negative_terms = ('bad', 'angry', 'hate', 'issue', 'problem', 'refund', 'broken', 'not working')
-    positive_terms = ('thanks', 'thank you', 'great', 'love', 'good', 'excellent', 'amazing')
+def fetch_page_picture_url(page_id: str, page_access_token: str) -> str:
+    if not page_id or not page_access_token:
+        return None
 
-    if any(term in lowered for term in negative_terms):
-        return 'Negative'
-    if any(term in lowered for term in positive_terms):
-        return 'Positive'
-    return 'Neutral'
+    try:
+        page_info = graph_get(page_id, {
+            'fields': 'picture.type(square){url}',
+            'access_token': page_access_token
+        })
+    except Exception as exc:
+        logger.info("Could not load Page picture for %s: %s", page_id, exc)
+        return None
+
+    return (((page_info.get('picture') or {}).get('data') or {}).get('url'))
 
 def build_instagram_asset_options(pages: list) -> list:
     assets = []
@@ -1228,19 +1229,22 @@ def dashboard(page_id=None):
     # If page_id in URL, use it directly (no session needed)
     if page_id:
         page_token = get_page_token(page_id)
-        page_name = session.get('connected_page_name', f'Page {page_id}')
+        page_name = get_saved_page_name(page_id) or session.get('connected_page_name') or f'Page {page_id}'
         return render_template('dashboard.html', 
                                page_name=page_name,
                                page_id=page_id,
-                               has_token=bool(page_token))
+                               has_token=bool(page_token),
+                               page_picture_url=fetch_page_picture_url(page_id, page_token))
     # Fallback to session
     page_name = session.get('connected_page_name')
     page_id = session.get('connected_page_id')
     if not page_name: return redirect('/')
+    page_token = get_connected_page_token(page_id)
     return render_template('dashboard.html', 
                            page_name=page_name,
                            page_id=page_id,
-                           has_token=True)
+                           has_token=bool(page_token),
+                           page_picture_url=fetch_page_picture_url(page_id, page_token))
 
 # -----------------------------------------------------------------------------
 # Instagram routes
@@ -2129,21 +2133,26 @@ def messenger_debug():
 def page_user_content_api():
     page_id = request.args.get('page_id') or session.get('connected_page_id')
     page_token = get_connected_page_token(page_id)
+    connected_session_page_id = session.get('connected_page_id')
 
     if not page_id:
-        return jsonify({'success': False, 'error': 'No connected page_id was provided.'}), 400
+        return jsonify({'success': False, 'error': 'No Facebook Page is connected. Please connect Facebook first.'}), 400
+    if connected_session_page_id and connected_session_page_id != page_id:
+        return jsonify({'success': False, 'error': 'This Facebook Page is not connected in your current session.'}), 403
     if not page_token:
-        return jsonify({'success': False, 'error': 'No connected page token found. Please reconnect the page.'}), 401
+        return jsonify({'success': False, 'error': 'Facebook authorization has expired. Please reconnect your account.'}), 401
 
     try:
         content = fetch_page_user_content(page_id, page_token)
         page_name = get_saved_page_name(page_id) or f'Page {page_id}'
+        comments = build_page_comment_items(content, page_id, page_name)
         return jsonify({
             'success': True,
             'page_id': page_id,
             'page_name': page_name,
-            'items': content,
-            'comments': build_page_comment_moderation_items(content, page_id, page_name),
+            'comments': comments,
+            'post_count': len(content),
+            'comment_count': len(comments),
             'permission_used': 'pages_read_user_content',
             'graph_edge': f'/{page_id}/feed',
             'synced_at': int(time.time())
@@ -2153,19 +2162,18 @@ def page_user_content_api():
             e,
             'Could not read Page user content from Meta.'
         )
+        if status_code == 403:
+            message = 'Nanovate does not currently have permission to retrieve Page user content.'
         return jsonify({
             'success': False,
             'error': message,
-            'details': extract_graph_api_error_message(e),
-            'permission_used': 'pages_read_user_content',
-            'raw_graph_error': extract_graph_api_error_payload(e)
+            'permission_used': 'pages_read_user_content'
         }), status_code
     except Exception as e:
         logger.exception("Reading Page user content failed for page %s.", page_id)
         return jsonify({
             'success': False,
             'error': 'Could not read Page user content.',
-            'details': str(e),
             'permission_used': 'pages_read_user_content'
         }), 500
 

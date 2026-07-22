@@ -7,13 +7,13 @@ This project now has a reviewer-visible flow for `pages_read_user_content`.
 - Messenger OAuth requests `pages_read_user_content`.
 - The dependency `pages_show_list` is already requested.
 - The app calls `GET /{page_id}/feed` after a Page is connected.
-- The Messenger dashboard shows the result in the Facebook Comments Moderation section.
+- The Messenger dashboard shows the result in the Facebook Page Comments section.
 
 ## App Review use case text
 
 Use this in the `pages_read_user_content` permission request:
 
-> Nanovate uses `pages_read_user_content` to let an authorized Page admin review recent Page feed content and comments inside the Messenger integration dashboard. After the admin connects their Facebook Page, the app calls the Page feed endpoint with the connected Page access token and displays recent feed items and comments so the admin can monitor user-generated Page activity before responding through the messaging workflow.
+> Nanovate uses `pages_read_user_content` to let an authorized Page admin view recent Facebook user comments on posts from their connected Page. After the admin connects their Facebook Page, the app retrieves recent Page posts and comments with the connected Page access token and displays the comment author, comment text, comment time, Page name, and related post context in the Nanovate dashboard.
 
 ## Screencast steps
 
@@ -26,10 +26,9 @@ Record one continuous video:
 5. Select the Business Portfolio if Meta shows that step.
 6. Select the Facebook Page.
 7. Open `/dashboard/<page_id>`.
-8. Open the `Facebook Comments Moderation` section.
-9. Click `Refresh Page Data`.
+8. Open the `Facebook Page Comments` section.
+9. Click `Refresh Comments`.
 10. Show the app displaying the Facebook Page name, related post, comment text, comment author, and comment time.
-11. Show the assignment, status, sentiment, and follow-up controls on the comment item.
 
 ## Test setup checklist
 

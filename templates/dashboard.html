@@ -291,117 +291,99 @@
             margin-bottom: 16px;
         }
 
-        .content-feed {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-top: 16px;
-        }
-
-        .content-item {
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 14px;
-        }
-
-        .content-item .content-meta {
-            color: #6b7280;
-            font-size: 11px;
-            margin-bottom: 6px;
-        }
-
-        .content-item .content-text {
-            color: #1f2937;
-            font-size: 13px;
-            line-height: 1.5;
-            overflow-wrap: anywhere;
-        }
-
-        .content-comments {
-            border-top: 1px solid #e5e7eb;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            margin-top: 12px;
-            padding-top: 10px;
-        }
-
-        .content-comment {
-            color: #4b5563;
-            font-size: 12px;
-            line-height: 1.4;
-            overflow-wrap: anywhere;
-        }
-
-        .content-link {
-            color: var(--primary);
-            display: inline-block;
-            font-size: 12px;
-            font-weight: 600;
-            margin-top: 10px;
-            text-decoration: none;
-        }
-
-        .moderation-toolbar {
+        .page-summary {
             align-items: center;
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 12px;
+            gap: 14px;
+            margin-bottom: 18px;
         }
 
+        .page-picture {
+            align-items: center;
+            background: #eff6ff;
+            border-radius: 12px;
+            color: var(--primary);
+            display: flex;
+            font-size: 20px;
+            font-weight: 800;
+            height: 48px;
+            justify-content: center;
+            overflow: hidden;
+            width: 48px;
+        }
+
+        .page-picture img {
+            height: 100%;
+            object-fit: cover;
+            width: 100%;
+        }
+
+        .page-title {
+            color: var(--text-main);
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .page-id-line,
         .sync-note {
             color: var(--text-sub);
             font-size: 12px;
+            margin-top: 3px;
         }
 
-        .moderation-layout {
-            display: grid;
-            gap: 18px;
-            grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
-            margin-top: 16px;
+        .connection-state {
+            background: #dcfce7;
+            border: 1px solid #bbf7d0;
+            border-radius: 999px;
+            color: #166534;
+            font-size: 12px;
+            font-weight: 700;
+            margin-left: auto;
+            padding: 6px 10px;
         }
 
         @media (max-width: 900px) {
-            .moderation-layout {
-                grid-template-columns: 1fr;
+            .connection-state {
+                margin-left: 0;
             }
         }
 
-        .moderation-column h4 {
-            color: var(--text-main);
-            font-size: 13px;
-            margin-bottom: 10px;
-            text-transform: uppercase;
+        .comments-toolbar {
+            align-items: flex-start;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 14px 0;
         }
 
-        .comment-item {
-            background: #fff;
-            border: 1px solid #dbeafe;
+        .comments-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .comment-card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
             border-left: 4px solid var(--primary);
             border-radius: 12px;
             padding: 14px;
         }
 
-        .comment-header {
-            align-items: flex-start;
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
+        .comment-meta {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.5;
             margin-bottom: 8px;
         }
 
         .comment-author {
             color: var(--text-main);
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 700;
-        }
-
-        .comment-time {
-            color: var(--text-sub);
-            font-size: 11px;
-            white-space: nowrap;
+            margin-bottom: 4px;
         }
 
         .comment-text {
@@ -412,64 +394,29 @@
         }
 
         .post-context {
-            background: #f9fafb;
-            border-radius: 10px;
             color: #4b5563;
             font-size: 12px;
-            line-height: 1.45;
+            line-height: 1.5;
             margin-top: 10px;
-            padding: 10px;
             overflow-wrap: anywhere;
         }
 
-        .moderation-actions {
-            display: grid;
-            gap: 10px;
-            grid-template-columns: 1fr 1fr;
-            margin-top: 12px;
-        }
-
-        .moderation-actions label {
-            margin-bottom: 4px;
-        }
-
-        .moderation-actions select {
-            width: 100%;
-            border: 1px solid #e5e7eb;
-            border-radius: 10px;
-            color: var(--text-main);
-            font-size: 13px;
-            padding: 10px;
-        }
-
-        .follow-up-row {
-            align-items: center;
-            color: #374151;
-            display: flex;
-            font-size: 13px;
-            gap: 8px;
-            grid-column: 1 / -1;
-        }
-
-        .follow-up-row input {
-            width: auto;
-        }
-
-        .pill-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
+        .comment-link {
+            color: var(--primary);
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
             margin-top: 10px;
+            text-decoration: none;
         }
 
-        .pill {
-            background: #eef2ff;
-            border: 1px solid #c7d2fe;
-            border-radius: 999px;
-            color: #3730a3;
-            font-size: 11px;
-            font-weight: 700;
-            padding: 5px 8px;
+        .empty-state {
+            border: 1px dashed #d1d5db;
+            border-radius: 12px;
+            color: #6b7280;
+            font-size: 14px;
+            padding: 18px;
+            text-align: center;
         }
 
     </style>
@@ -511,27 +458,36 @@
                 <div id="result" class="result-box"></div>
 
                 <div class="content-review">
-                    <h3>Facebook Comments Moderation</h3>
-                    <p class="hint">
-                        Page: <strong>{{ page_name }}</strong>{% if page_id %} | {{ page_id }}{% endif %}
-                    </p>
-                    <div class="moderation-toolbar">
+                    <h3>Facebook Page Comments</h3>
+                    <div class="page-summary">
+                        <div class="page-picture" aria-hidden="true">
+                            {% if page_picture_url %}
+                            <img src="{{ page_picture_url }}" alt="">
+                            {% else %}
+                            {{ page_name[0] | upper }}
+                            {% endif %}
+                        </div>
+                        <div>
+                            <div class="page-title">{{ page_name }}</div>
+                            {% if page_id %}
+                            <div class="page-id-line">Page ID: {{ page_id }}</div>
+                            {% endif %}
+                            <div class="sync-note" id="page-user-content-sync">Not refreshed yet</div>
+                        </div>
+                        <div class="connection-state">{{ 'Connected' if has_token else 'Reconnect required' }}</div>
+                    </div>
+
+                    <div class="comments-toolbar">
+                        <div>
+                            <h3>Recent Comments</h3>
+                            <p class="hint">Comments from recent posts on the connected Facebook Page.</p>
+                        </div>
                         <button type="button" class="btn-tool" id="load-user-content">
-                            Refresh Page Data
+                            Refresh Comments
                         </button>
-                        <span class="sync-note" id="page-user-content-sync">Not synchronized yet</span>
                     </div>
                     <div id="page-user-content-result" class="result-box"></div>
-                    <div class="moderation-layout">
-                        <section class="moderation-column">
-                            <h4>Facebook Comments</h4>
-                            <div id="page-comments-feed" class="content-feed"></div>
-                        </section>
-                        <section class="moderation-column">
-                            <h4>Related Posts</h4>
-                            <div id="page-user-content-feed" class="content-feed"></div>
-                        </section>
-                    </div>
+                    <div id="page-comments-feed" class="comments-list"></div>
                 </div>
             </div>
         </div>
@@ -563,7 +519,6 @@
         const debugBox = document.getElementById('debug-box');
         const loadUserContentBtn = document.getElementById('load-user-content');
         const pageUserContentResult = document.getElementById('page-user-content-result');
-        const pageUserContentFeed = document.getElementById('page-user-content-feed');
         const pageCommentsFeed = document.getElementById('page-comments-feed');
         const pageUserContentSync = document.getElementById('page-user-content-sync');
 
@@ -579,104 +534,29 @@
             pageUserContentResult.textContent = message;
         }
 
-        function createPill(text) {
-            const pill = document.createElement('span');
-            pill.className = 'pill';
-            setText(pill, text);
-            return pill;
-        }
-
-        function renderPostList(items) {
-            pageUserContentFeed.innerHTML = '';
-
-            if (!items.length) {
-                const empty = document.createElement('div');
-                empty.className = 'content-item';
-                setText(empty, 'No Page feed items were returned for this Page.');
-                pageUserContentFeed.appendChild(empty);
-                return;
-            }
-
-            items.forEach(item => {
-                const wrapper = document.createElement('div');
-                wrapper.className = 'content-item';
-
-                const meta = document.createElement('div');
-                meta.className = 'content-meta';
-                const created = item.created_time ? new Date(item.created_time).toLocaleString() : 'Unknown time';
-                setText(meta, `${item.from_name || 'Unknown'} | ${created} | ${item.id || 'No ID'}`);
-
-                const text = document.createElement('div');
-                text.className = 'content-text';
-                setText(text, item.message || item.story || '[no message text]');
-
-                wrapper.appendChild(meta);
-                wrapper.appendChild(text);
-
-                if (item.permalink_url) {
-                    const link = document.createElement('a');
-                    link.className = 'content-link';
-                    link.href = item.permalink_url;
-                    link.target = '_blank';
-                    link.rel = 'noopener';
-                    setText(link, 'Open on Facebook');
-                    wrapper.appendChild(link);
-                }
-
-                if (item.comments?.length) {
-                    const comments = document.createElement('div');
-                    comments.className = 'content-comments';
-                    item.comments.forEach(comment => {
-                        const row = document.createElement('div');
-                        row.className = 'content-comment';
-                        const commentDate = comment.created_time ? new Date(comment.created_time).toLocaleString() : 'Unknown time';
-                        setText(row, `${comment.from_name || 'Unknown'} | ${commentDate}: ${comment.message || '[no comment text]'}`);
-                        comments.appendChild(row);
-                    });
-                    wrapper.appendChild(comments);
-                }
-
-                if (item.comment_fetch_error) {
-                    const warning = document.createElement('div');
-                    warning.className = 'content-comment';
-                    warning.style.color = '#991b1b';
-                    warning.style.marginTop = '10px';
-                    setText(warning, `Comment sync warning: ${item.comment_fetch_error}`);
-                    wrapper.appendChild(warning);
-                }
-
-                pageUserContentFeed.appendChild(wrapper);
-            });
-        }
-
-        function renderModerationComments(comments, pageName) {
+        function renderComments(comments) {
             pageCommentsFeed.innerHTML = '';
 
             if (!comments.length) {
                 const empty = document.createElement('div');
-                empty.className = 'comment-item';
-                setText(empty, 'No Facebook comments were returned for this Page sync.');
+                empty.className = 'empty-state';
+                setText(empty, 'No Facebook Page comments were found.');
                 pageCommentsFeed.appendChild(empty);
                 return;
             }
 
             comments.forEach(comment => {
                 const wrapper = document.createElement('div');
-                wrapper.className = 'comment-item';
-
-                const header = document.createElement('div');
-                header.className = 'comment-header';
+                wrapper.className = 'comment-card';
 
                 const author = document.createElement('div');
                 author.className = 'comment-author';
                 setText(author, comment.comment_author || 'Unknown author');
 
-                const time = document.createElement('div');
-                time.className = 'comment-time';
-                setText(time, comment.comment_created_time ? new Date(comment.comment_created_time).toLocaleString() : 'Unknown time');
-
-                header.appendChild(author);
-                header.appendChild(time);
+                const meta = document.createElement('div');
+                meta.className = 'comment-meta';
+                const commentDate = comment.comment_created_time ? new Date(comment.comment_created_time).toLocaleString() : 'Unknown time';
+                setText(meta, `${commentDate} | Page: ${comment.page_name || 'Unknown Page'} | Comment ID: ${comment.comment_id || 'Unknown'}`);
 
                 const text = document.createElement('div');
                 text.className = 'comment-text';
@@ -684,63 +564,19 @@
 
                 const post = document.createElement('div');
                 post.className = 'post-context';
-                setText(post, `Page: ${comment.page_name || pageName || 'Unknown Page'} | Post: ${comment.post_text || '[no post text]'} | Post ID: ${comment.post_id || 'Unknown'}`);
+                const shortPost = comment.post_text && comment.post_text.length > 140
+                    ? `${comment.post_text.slice(0, 140)}...`
+                    : (comment.post_text || '[no post text]');
+                setText(post, `Post: ${shortPost} | Post ID: ${comment.post_id || 'Unknown'}`);
 
-                const pills = document.createElement('div');
-                pills.className = 'pill-row';
-                pills.appendChild(createPill(comment.status || 'Needs review'));
-                pills.appendChild(createPill(`Sentiment: ${comment.sentiment || 'Neutral'}`));
-                pills.appendChild(createPill(`Comment ID: ${comment.comment_id || 'Unknown'}`));
-
-                const actions = document.createElement('div');
-                actions.className = 'moderation-actions';
-
-                const assignGroup = document.createElement('div');
-                const assignLabel = document.createElement('label');
-                setText(assignLabel, 'Assign to');
-                const assign = document.createElement('select');
-                ['Unassigned', 'Support', 'Sales', 'Tech Ops'].forEach(optionText => {
-                    const option = document.createElement('option');
-                    setText(option, optionText);
-                    assign.appendChild(option);
-                });
-                assignGroup.appendChild(assignLabel);
-                assignGroup.appendChild(assign);
-
-                const statusGroup = document.createElement('div');
-                const statusLabel = document.createElement('label');
-                setText(statusLabel, 'Status');
-                const status = document.createElement('select');
-                ['Needs review', 'Assigned', 'Resolved', 'Follow-up'].forEach(optionText => {
-                    const option = document.createElement('option');
-                    setText(option, optionText);
-                    status.appendChild(option);
-                });
-                statusGroup.appendChild(statusLabel);
-                statusGroup.appendChild(status);
-
-                const follow = document.createElement('label');
-                follow.className = 'follow-up-row';
-                const followInput = document.createElement('input');
-                followInput.type = 'checkbox';
-                const followText = document.createElement('span');
-                setText(followText, 'Mark interaction for follow-up');
-                follow.appendChild(followInput);
-                follow.appendChild(followText);
-
-                actions.appendChild(assignGroup);
-                actions.appendChild(statusGroup);
-                actions.appendChild(follow);
-
-                wrapper.appendChild(header);
+                wrapper.appendChild(author);
+                wrapper.appendChild(meta);
                 wrapper.appendChild(text);
                 wrapper.appendChild(post);
-                wrapper.appendChild(pills);
-                wrapper.appendChild(actions);
 
                 if (comment.comment_permalink_url) {
                     const link = document.createElement('a');
-                    link.className = 'content-link';
+                    link.className = 'comment-link';
                     link.href = comment.comment_permalink_url;
                     link.target = '_blank';
                     link.rel = 'noopener';
@@ -750,11 +586,6 @@
 
                 pageCommentsFeed.appendChild(wrapper);
             });
-        }
-
-        function renderPageUserContent(data) {
-            renderModerationComments(data.comments || [], data.page_name);
-            renderPostList(data.items || []);
         }
 
         async function updateFeed() {
@@ -863,27 +694,25 @@
 
         loadUserContentBtn.onclick = async () => {
             loadUserContentBtn.disabled = true;
-            loadUserContentBtn.textContent = 'Synchronizing...';
-            pageUserContentFeed.innerHTML = '';
+            loadUserContentBtn.textContent = 'Loading...';
             pageCommentsFeed.innerHTML = '';
             try {
                 const response = await fetch(`/api/page-user-content?page_id=${encodeURIComponent(connectedPageId || '')}`);
                 const data = await response.json();
                 if (!response.ok || !data.success) {
-                    const detail = data.details ? ` Details: ${data.details}` : '';
-                    showUserContentResult(false, `${data.error || 'Could not load Page user content.'}${detail}`);
+                    showUserContentResult(false, data.error || 'Could not load Facebook Page comments.');
                     return;
                 }
 
                 const syncedAt = data.synced_at ? new Date(data.synced_at * 1000).toLocaleString() : new Date().toLocaleString();
-                pageUserContentSync.textContent = `Last synchronized: ${syncedAt}`;
-                showUserContentResult(true, `Synchronized ${data.items.length} post(s) and ${data.comments.length} comment(s) for ${data.page_name}.`);
-                renderPageUserContent(data);
+                pageUserContentSync.textContent = `Last refreshed: ${syncedAt}`;
+                showUserContentResult(true, `Loaded ${data.comment_count} comment(s) for ${data.page_name}.`);
+                renderComments(data.comments || []);
             } catch (err) {
-                showUserContentResult(false, err.message);
+                showUserContentResult(false, 'Meta API request failed. Please try again.');
             } finally {
                 loadUserContentBtn.disabled = false;
-                loadUserContentBtn.textContent = 'Refresh Page Data';
+                loadUserContentBtn.textContent = 'Refresh Comments';
             }
         };
     </script>
