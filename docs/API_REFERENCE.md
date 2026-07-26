@@ -118,6 +118,22 @@ Form fields:
 - `message`
 - `page_id` optional if session already contains connected Instagram account
 
+### Instagram content publishing
+
+- `POST /api/instagram/publish`
+
+Request body or form fields:
+
+- `ig_account_id` optional if session already contains connected Instagram account
+- `image_url` public HTTP or HTTPS image URL
+- `caption` optional, maximum 2200 characters
+
+Purpose:
+
+- creates an Instagram media container
+- publishes the media container to the connected Instagram professional account
+- demonstrates the `instagram_content_publish` permission for Meta App Review
+
 ## Instagram Comments APIs
 
 ### Fetch comments

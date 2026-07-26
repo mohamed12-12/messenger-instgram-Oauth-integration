@@ -37,7 +37,7 @@ SECRET_KEY      = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123')
 
 # Instagram-specific configuration
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
-INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata,business_management'
+INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata,business_management'
 
 # WhatsApp-specific configuration
 WHATSAPP_APP_ID = os.getenv('WHATSAPP_APP_ID')
@@ -1197,6 +1197,46 @@ def get_instagram_page_token(ig_account_id=None):
 def send_instagram_message(recipient_id: str, text: str, page_access_token: str):
     return send_graph_message(recipient_id, text, page_access_token)
 
+def publish_instagram_image(ig_account_id: str, image_url: str, caption: str, page_access_token: str) -> dict:
+    container = graph_post(
+        f'{ig_account_id}/media',
+        params={'access_token': page_access_token},
+        data={
+            'image_url': image_url,
+            'caption': caption
+        }
+    )
+    creation_id = container.get('id')
+    if not creation_id:
+        raise ValueError('Meta did not return an Instagram media container ID.')
+
+    published = graph_post(
+        f'{ig_account_id}/media_publish',
+        params={'access_token': page_access_token},
+        data={'creation_id': creation_id}
+    )
+    media_id = published.get('id')
+    permalink = None
+    if media_id:
+        try:
+            media = graph_get(
+                media_id,
+                {
+                    'fields': 'id,permalink,caption,timestamp,media_type',
+                    'access_token': page_access_token
+                }
+            )
+            permalink = media.get('permalink')
+        except requests.HTTPError:
+            logger.warning("Instagram post published but permalink lookup failed for media %s", media_id)
+
+    return {
+        'creation_id': creation_id,
+        'media_id': media_id,
+        'permalink': permalink,
+        'raw_publish_result': published
+    }
+
 def get_whatsapp_app_id():
     return WHATSAPP_APP_ID or META_APP_ID
 
@@ -1304,6 +1344,7 @@ def meta_oauth_debug():
         'messenger_pages_manage_posts_requested': 'pages_manage_posts' in SCOPES.split(','),
         'messenger_read_insights_requested': 'read_insights' in SCOPES.split(','),
         'instagram_business_management_requested': 'business_management' in INSTAGRAM_SCOPES.split(','),
+        'instagram_content_publish_requested': 'instagram_content_publish' in INSTAGRAM_SCOPES.split(','),
         'selected_business_id': business_id,
         'selected_business_name': business_name,
         'has_user_access_token_in_session': bool(session.get('user_access_token')),
@@ -2201,6 +2242,56 @@ def instagram_delete_comment():
     except Exception:
         logger.exception("Unexpected error while deleting Instagram comment %s", comment_id)
         return jsonify({'success': False, 'error': 'Failed to delete Instagram comment.'}), 500
+
+@app.route('/api/instagram/publish', methods=['POST'])
+def instagram_publish():
+    data = request.get_json(silent=True) or request.form
+    ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
+    image_url = (data.get('image_url') or '').strip()
+    caption = (data.get('caption') or '').strip()
+
+    if not ig_account_id:
+        return jsonify({'success': False, 'error': 'No Instagram account is connected.'}), 400
+
+    session_ig_account_id = session.get('instagram_account_id')
+    if session_ig_account_id and session_ig_account_id != ig_account_id:
+        return jsonify({'success': False, 'error': 'Selected Instagram account does not match the connected session.'}), 403
+
+    if not image_url:
+        return jsonify({
+            'success': False,
+            'error': 'Image URL is required. Instagram content publishing creates media posts, so caption-only posts are not supported.'
+        }), 400
+    if not image_url.lower().startswith(('https://', 'http://')):
+        return jsonify({'success': False, 'error': 'Use a public HTTP or HTTPS image URL that Meta can access.'}), 400
+    if len(caption) > 2200:
+        return jsonify({'success': False, 'error': 'Instagram captions must be 2200 characters or fewer.'}), 400
+
+    token = get_instagram_page_token(ig_account_id)
+    if not token:
+        logger.warning("Instagram publish failed: missing token for account %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
+
+    try:
+        result = publish_instagram_image(ig_account_id, image_url, caption, token)
+        logger.info("Instagram media published for account %s media=%s", ig_account_id, result.get('media_id'))
+        return jsonify({
+            'success': True,
+            'permission_used': 'instagram_content_publish',
+            'ig_account_id': ig_account_id,
+            'image_url': image_url,
+            'caption': caption,
+            **result
+        })
+    except requests.HTTPError as e:
+        logger.exception("Meta Graph HTTP error while publishing Instagram content for %s", ig_account_id)
+        error_message, status_code = format_graph_api_error(e, 'Could not publish Instagram content.')
+        return jsonify({'success': False, 'error': error_message}), status_code
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 502
+    except Exception:
+        logger.exception("Unexpected error while publishing Instagram content for %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'Could not publish Instagram content.'}), 500
 
 @app.route('/instagram/send', methods=['POST'])
 def instagram_send():

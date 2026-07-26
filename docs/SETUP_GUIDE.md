@@ -88,10 +88,12 @@ Instagram flow requests:
 - `instagram_basic`
 - `instagram_manage_messages`
 - `instagram_manage_comments`
+- `instagram_content_publish`
 - `pages_messaging`
 - `pages_read_engagement`
 - `pages_show_list`
 - `pages_manage_metadata`
+- `business_management`
 
 ## 5. OAuth Callback URLs
 
@@ -178,6 +180,7 @@ URL:
 Use it to:
 
 - Send manual Instagram messages to a PSID
+- Publish an image post with a caption for App Review testing of `instagram_content_publish`
 - View recent Instagram webhook events
 - Inspect webhook health
 

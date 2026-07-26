@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instagram Dashboard — Nanovate</title>
+    <title>Instagram Dashboard - Nanovate</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -40,6 +40,7 @@
             max-width: 1200px;
             margin: 0 auto;
             width: 100%;
+            min-width: 0;
         }
 
         .logo {
@@ -76,10 +77,15 @@
             gap: 32px;
         }
 
+        .left-col,
+        .right-col {
+            min-width: 0;
+        }
+
         .card {
             background: white;
             padding: 32px;
-            border-radius: 24px;
+            border-radius: 16px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.05);
             margin-bottom: 32px;
         }
@@ -109,6 +115,7 @@
             border-radius: 12px;
             font-family: inherit;
             font-size: 16px;
+            line-height: 1.45;
         }
 
         .btn-send {
@@ -125,6 +132,98 @@
 
         .btn-send:hover {
             opacity: 0.9;
+        }
+
+        .permission-note {
+            background: #FFF7ED;
+            border: 1px solid #FED7AA;
+            color: #7C2D12;
+            border-radius: 12px;
+            padding: 14px 16px;
+            line-height: 1.5;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .helper-text {
+            font-size: 12px;
+            color: #6B7280;
+            line-height: 1.45;
+            margin-top: 6px;
+        }
+
+        .publish-result {
+            display: none;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-top: 16px;
+            overflow-wrap: anywhere;
+        }
+
+        .publish-result.success {
+            display: block;
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            color: #065F46;
+        }
+
+        .publish-result.error {
+            display: block;
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            color: #991B1B;
+        }
+
+        .publish-fields {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 16px;
+        }
+
+        .publish-meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .meta-chip {
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            padding: 12px;
+            color: #4B5563;
+            font-size: 13px;
+            overflow-wrap: anywhere;
+        }
+
+        .meta-chip strong {
+            display: block;
+            color: #111827;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .form-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-top: 14px;
+        }
+
+        .form-footer .btn-send {
+            width: auto;
+            min-width: 220px;
+        }
+
+        .char-count {
+            color: #6B7280;
+            font-size: 13px;
+            white-space: nowrap;
         }
 
         .message-list {
@@ -192,6 +291,44 @@
             font-weight: 700;
             font-size: 20px;
         }
+
+        @media (max-width: 960px) {
+            body {
+                display: block;
+            }
+
+            .sidebar {
+                width: 100%;
+                padding: 20px;
+            }
+
+            .logo {
+                margin-bottom: 20px;
+            }
+
+            .main {
+                padding: 24px;
+            }
+
+            .dashboard-grid,
+            .publish-meta {
+                grid-template-columns: 1fr;
+            }
+
+            .connected-card,
+            .form-footer {
+                flex-direction: column;
+                align-items: stretch !important;
+            }
+
+            .form-footer .btn-send {
+                width: 100%;
+            }
+
+            .card {
+                padding: 20px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -221,7 +358,7 @@
             </div>
         </div>
         <!-- Section 1: Connected Account -->
-        <div class="card" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 32px; border: 1px solid #E1306C; margin-bottom: 24px;">
+        <div class="card connected-card" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 32px; border: 1px solid #E1306C; margin-bottom: 24px;">
             <div style="display: flex; align-items: center; gap: 16px;">
                 <div class="ig-avatar">{{ username[0]|upper }}</div>
                 <div>
@@ -244,6 +381,43 @@
 
         <div class="dashboard-grid">
             <div class="left-col">
+                <!-- Section 2: Instagram Content Publishing -->
+                <div class="card">
+                    <h2 style="font-size: 18px; margin-bottom: 12px;">Instagram Content Publishing</h2>
+                    <div class="permission-note">
+                        Meta permission shown: <code>instagram_content_publish</code> publishes an image post to the connected Instagram professional account.
+                    </div>
+                    <div class="publish-meta">
+                        <div class="meta-chip">
+                            <strong>Instagram account</strong>
+                            @{{ username }}
+                        </div>
+                        <div class="meta-chip">
+                            <strong>Account ID</strong>
+                            {{ account_id }}
+                        </div>
+                    </div>
+                    <form id="publishForm">
+                        <input type="hidden" id="publish_ig_account_id" name="ig_account_id" value="{{ account_id }}">
+                        <div class="publish-fields">
+                            <div class="form-group">
+                                <label class="label">Public Image URL</label>
+                                <input type="url" id="publish_image_url" name="image_url" placeholder="https://example.com/review-image.jpg" required>
+                                <p class="helper-text">Use a public image URL that Meta can fetch. Caption-only Instagram publishing is not supported by this flow.</p>
+                            </div>
+                            <div class="form-group">
+                                <label class="label">Caption</label>
+                                <textarea id="publish_caption" name="caption" rows="4" maxlength="2200" placeholder="Write the caption for the Meta review test post..."></textarea>
+                            </div>
+                        </div>
+                        <div class="form-footer">
+                            <button type="submit" class="btn-send">Publish Instagram Post</button>
+                            <span class="char-count"><span id="captionCount">0</span> / 2200</span>
+                        </div>
+                    </form>
+                    <div id="publishResult" class="publish-result"></div>
+                </div>
+
                 <!-- Section 2: Send Message -->
                 <div class="card">
                     <h2 style="font-size: 18px; margin-bottom: 20px;">Send Live Message from App UI</h2>
@@ -293,6 +467,54 @@
 
     <script>
         const connectedInstagramId = {{ account_id|tojson }};
+        const publishForm = document.getElementById('publishForm');
+        const publishCaption = document.getElementById('publish_caption');
+        const captionCount = document.getElementById('captionCount');
+        const publishResult = document.getElementById('publishResult');
+
+        function showPublishResult(type, message) {
+            publishResult.className = `publish-result ${type}`;
+            publishResult.innerHTML = message;
+        }
+
+        publishCaption.addEventListener('input', () => {
+            captionCount.textContent = publishCaption.value.length;
+        });
+
+        publishForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const submitButton = publishForm.querySelector('button[type="submit"]');
+
+            submitButton.disabled = true;
+            submitButton.textContent = "Publishing...";
+            showPublishResult('success', 'Creating Instagram media container...');
+
+            try {
+                const res = await fetch('/api/instagram/publish', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    const mediaLine = data.media_id ? `<div><strong>Published Media ID:</strong> ${data.media_id}</div>` : '';
+                    const containerLine = data.creation_id ? `<div><strong>Container ID:</strong> ${data.creation_id}</div>` : '';
+                    const linkLine = data.permalink ? `<div><a href="${data.permalink}" target="_blank" rel="noopener">Open published Instagram post</a></div>` : '';
+                    showPublishResult(
+                        'success',
+                        `<div><strong>instagram_content_publish approved demo:</strong> post published successfully.</div>${mediaLine}${containerLine}${linkLine}`
+                    );
+                } else {
+                    showPublishResult('error', data.error || 'Could not publish Instagram content.');
+                }
+            } catch (err) {
+                showPublishResult('error', 'Network error while publishing Instagram content.');
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = "Publish Instagram Post";
+            }
+        };
 
         // Send Message logic
         document.getElementById('msgForm').onsubmit = async (e) => {
