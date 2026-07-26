@@ -1237,6 +1237,28 @@ def save_instagram_image_upload(uploaded_file) -> dict:
         'image_url': build_public_static_url(stored_filename)
     }
 
+def wait_for_instagram_container_ready(creation_id: str, page_access_token: str, attempts: int = 8, delay_seconds: float = 1.5) -> dict:
+    last_payload = None
+    for _ in range(attempts):
+        payload = graph_get(
+            creation_id,
+            {
+                'fields': 'id,status_code,status',
+                'access_token': page_access_token
+            }
+        )
+        last_payload = payload
+        status_code = (payload.get('status_code') or '').upper()
+        if status_code == 'FINISHED':
+            return payload
+        if status_code in {'ERROR', 'EXPIRED'}:
+            raise RuntimeError(f'Instagram media container is not publishable. Status: {status_code}.')
+        time.sleep(delay_seconds)
+
+    raise RuntimeError(
+        f"Instagram media container is still not ready for publishing. Last status: {(last_payload or {}).get('status_code', 'UNKNOWN')}."
+    )
+
 def publish_instagram_image(ig_account_id: str, image_url: str, caption: str, page_access_token: str) -> dict:
     container = graph_post(
         f'{ig_account_id}/media',
@@ -1250,28 +1272,34 @@ def publish_instagram_image(ig_account_id: str, image_url: str, caption: str, pa
     if not creation_id:
         raise RuntimeError('Meta did not return an Instagram media container ID.')
 
+    container_status = wait_for_instagram_container_ready(creation_id, page_access_token)
     published = graph_post(
         f'{ig_account_id}/media_publish',
         params={'access_token': page_access_token},
         data={'creation_id': creation_id}
     )
     media_id = published.get('id')
+    if not media_id:
+        raise RuntimeError(
+            f"Instagram publish completed without a media id. Publish response: {json.dumps(published, ensure_ascii=True)}"
+        )
+
     permalink = None
-    if media_id:
-        try:
-            media = graph_get(
-                media_id,
-                {
-                    'fields': 'id,permalink,caption,timestamp,media_type',
-                    'access_token': page_access_token
-                }
-            )
-            permalink = media.get('permalink')
-        except requests.HTTPError:
-            logger.warning("Instagram post published but permalink lookup failed for media %s", media_id)
+    try:
+        media = graph_get(
+            media_id,
+            {
+                'fields': 'id,permalink,caption,timestamp,media_type',
+                'access_token': page_access_token
+            }
+        )
+        permalink = media.get('permalink')
+    except requests.HTTPError:
+        logger.warning("Instagram post published but permalink lookup failed for media %s", media_id)
 
     return {
         'creation_id': creation_id,
+        'container_status': container_status,
         'media_id': media_id,
         'permalink': permalink,
         'raw_publish_result': published
