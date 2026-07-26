@@ -126,7 +126,6 @@ Request body or form fields:
 
 - `ig_account_id` optional if session already contains connected Instagram account
 - `image_file` uploaded JPG or PNG image
-- `image_url` optional public HTTP or HTTPS image URL fallback
 - `caption` optional, maximum 2200 characters
 
 Purpose:

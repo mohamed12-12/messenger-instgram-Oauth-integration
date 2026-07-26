@@ -2364,7 +2364,6 @@ def instagram_unlike_comment():
 def instagram_publish():
     data = request.get_json(silent=True) or request.form
     ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
-    image_url = (data.get('image_url') or '').strip()
     caption = (data.get('caption') or '').strip()
     uploaded_file = request.files.get('image_file')
     has_upload = bool(uploaded_file and uploaded_file.filename)
@@ -2376,13 +2375,11 @@ def instagram_publish():
     if session_ig_account_id and session_ig_account_id != ig_account_id:
         return jsonify({'success': False, 'error': 'Selected Instagram account does not match the connected session.'}), 403
 
-    if not image_url and not has_upload:
+    if not has_upload:
         return jsonify({
             'success': False,
-            'error': 'Upload an image or provide an image URL. Instagram content publishing creates media posts, so caption-only posts are not supported.'
+            'error': 'Upload an image before publishing. Caption-only Instagram publishing is not supported.'
         }), 400
-    if image_url and not image_url.lower().startswith(('https://', 'http://')):
-        return jsonify({'success': False, 'error': 'Use a public HTTP or HTTPS image URL that Meta can access.'}), 400
     if len(caption) > 2200:
         return jsonify({'success': False, 'error': 'Instagram captions must be 2200 characters or fewer.'}), 400
 
@@ -2393,11 +2390,9 @@ def instagram_publish():
 
     try:
         upload_context = None
-        image_source = 'url'
-        if has_upload:
-            upload_context = save_instagram_image_upload(uploaded_file)
-            image_url = upload_context['image_url']
-            image_source = 'upload'
+        image_source = 'upload'
+        upload_context = save_instagram_image_upload(uploaded_file)
+        image_url = upload_context['image_url']
 
         result = publish_instagram_image(ig_account_id, image_url, caption, token)
         logger.info("Instagram media published for account %s media=%s", ig_account_id, result.get('media_id'))

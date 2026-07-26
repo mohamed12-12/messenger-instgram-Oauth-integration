@@ -414,13 +414,8 @@
                             <div class="form-group">
                                 <label class="label">Upload Image</label>
                                 <input type="file" id="publish_image_file" name="image_file" accept="image/png,image/jpeg">
-                                <p class="helper-text">Choose a JPG or PNG. The app saves it temporarily and sends Meta a public image URL.</p>
+                                <p class="helper-text">Choose a JPG or PNG. The app uploads it, prepares it for Instagram publishing, and sends it to Meta from the server.</p>
                                 <img id="uploadPreview" class="upload-preview" alt="Selected Instagram upload preview">
-                            </div>
-                            <div class="form-group">
-                                <label class="label">Public Image URL Backup</label>
-                                <input type="url" id="publish_image_url" name="image_url" placeholder="https://example.com/review-image.jpg">
-                                <p class="helper-text">Optional fallback if you already have a public image URL. Caption-only Instagram publishing is not supported.</p>
                             </div>
                             <div class="form-group">
                                 <label class="label">Caption</label>
@@ -487,7 +482,6 @@
         const publishForm = document.getElementById('publishForm');
         const publishCaption = document.getElementById('publish_caption');
         const publishImageFile = document.getElementById('publish_image_file');
-        const publishImageUrl = document.getElementById('publish_image_url');
         const uploadPreview = document.getElementById('uploadPreview');
         const captionCount = document.getElementById('captionCount');
         const publishResult = document.getElementById('publishResult');
@@ -517,8 +511,8 @@
             const formData = new FormData(e.target);
             const submitButton = publishForm.querySelector('button[type="submit"]');
 
-            if (!publishImageFile.files.length && !publishImageUrl.value.trim()) {
-                showPublishResult('error', 'Upload an image or provide a public image URL before publishing.');
+            if (!publishImageFile.files.length) {
+                showPublishResult('error', 'Upload an image before publishing.');
                 return;
             }
 
