@@ -125,11 +125,13 @@ Form fields:
 Request body or form fields:
 
 - `ig_account_id` optional if session already contains connected Instagram account
-- `image_url` public HTTP or HTTPS image URL
+- `image_file` uploaded JPG or PNG image
+- `image_url` optional public HTTP or HTTPS image URL fallback
 - `caption` optional, maximum 2200 characters
 
 Purpose:
 
+- accepts a dashboard image upload and exposes it from `/static/uploads/instagram/...`
 - creates an Instagram media container
 - publishes the media container to the connected Instagram professional account
 - demonstrates the `instagram_content_publish` permission for Meta App Review

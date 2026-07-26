@@ -51,6 +51,7 @@ PORT=5000
 Important:
 
 - `REDIRECT_URI` and `INSTAGRAM_REDIRECT_URI` must exactly match the URLs configured in Meta
+- `APP_BASE_URL` should be your public HTTPS domain so uploaded Instagram review images resolve to a Meta-accessible URL
 - `VERIFY_TOKEN` must exactly match the verify token used when configuring webhooks
 - The webhook URL vars are reference values for your team; the current app logic does not read them directly
 
@@ -180,7 +181,7 @@ URL:
 Use it to:
 
 - Send manual Instagram messages to a PSID
-- Publish an image post with a caption for App Review testing of `instagram_content_publish`
+- Upload an image and publish it with a caption for App Review testing of `instagram_content_publish`
 - View recent Instagram webhook events
 - Inspect webhook health
 

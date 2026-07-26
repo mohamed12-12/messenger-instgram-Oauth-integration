@@ -226,6 +226,17 @@
             white-space: nowrap;
         }
 
+        .upload-preview {
+            display: none;
+            width: 100%;
+            max-height: 260px;
+            object-fit: contain;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            background: #F9FAFB;
+            margin-top: 12px;
+        }
+
         .message-list {
             max-height: 500px;
             overflow-y: auto;
@@ -397,13 +408,19 @@
                             {{ account_id }}
                         </div>
                     </div>
-                    <form id="publishForm">
+                    <form id="publishForm" enctype="multipart/form-data">
                         <input type="hidden" id="publish_ig_account_id" name="ig_account_id" value="{{ account_id }}">
                         <div class="publish-fields">
                             <div class="form-group">
-                                <label class="label">Public Image URL</label>
-                                <input type="url" id="publish_image_url" name="image_url" placeholder="https://example.com/review-image.jpg" required>
-                                <p class="helper-text">Use a public image URL that Meta can fetch. Caption-only Instagram publishing is not supported by this flow.</p>
+                                <label class="label">Upload Image</label>
+                                <input type="file" id="publish_image_file" name="image_file" accept="image/png,image/jpeg">
+                                <p class="helper-text">Choose a JPG or PNG. The app saves it temporarily and sends Meta a public image URL.</p>
+                                <img id="uploadPreview" class="upload-preview" alt="Selected Instagram upload preview">
+                            </div>
+                            <div class="form-group">
+                                <label class="label">Public Image URL Backup</label>
+                                <input type="url" id="publish_image_url" name="image_url" placeholder="https://example.com/review-image.jpg">
+                                <p class="helper-text">Optional fallback if you already have a public image URL. Caption-only Instagram publishing is not supported.</p>
                             </div>
                             <div class="form-group">
                                 <label class="label">Caption</label>
@@ -469,6 +486,9 @@
         const connectedInstagramId = {{ account_id|tojson }};
         const publishForm = document.getElementById('publishForm');
         const publishCaption = document.getElementById('publish_caption');
+        const publishImageFile = document.getElementById('publish_image_file');
+        const publishImageUrl = document.getElementById('publish_image_url');
+        const uploadPreview = document.getElementById('uploadPreview');
         const captionCount = document.getElementById('captionCount');
         const publishResult = document.getElementById('publishResult');
 
@@ -481,14 +501,30 @@
             captionCount.textContent = publishCaption.value.length;
         });
 
+        publishImageFile.addEventListener('change', () => {
+            const file = publishImageFile.files && publishImageFile.files[0];
+            if (!file) {
+                uploadPreview.style.display = 'none';
+                uploadPreview.removeAttribute('src');
+                return;
+            }
+            uploadPreview.src = URL.createObjectURL(file);
+            uploadPreview.style.display = 'block';
+        });
+
         publishForm.onsubmit = async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
             const submitButton = publishForm.querySelector('button[type="submit"]');
 
+            if (!publishImageFile.files.length && !publishImageUrl.value.trim()) {
+                showPublishResult('error', 'Upload an image or provide a public image URL before publishing.');
+                return;
+            }
+
             submitButton.disabled = true;
             submitButton.textContent = "Publishing...";
-            showPublishResult('success', 'Creating Instagram media container...');
+            showPublishResult('success', 'Preparing image and creating Instagram media container...');
 
             try {
                 const res = await fetch('/api/instagram/publish', {
@@ -498,12 +534,14 @@
                 const data = await res.json();
 
                 if (data.success) {
+                    const sourceLine = data.image_source ? `<div><strong>Image Source:</strong> ${data.image_source}</div>` : '';
                     const mediaLine = data.media_id ? `<div><strong>Published Media ID:</strong> ${data.media_id}</div>` : '';
                     const containerLine = data.creation_id ? `<div><strong>Container ID:</strong> ${data.creation_id}</div>` : '';
+                    const uploadedLine = data.uploaded_file?.original_filename ? `<div><strong>Uploaded File:</strong> ${data.uploaded_file.original_filename}</div>` : '';
                     const linkLine = data.permalink ? `<div><a href="${data.permalink}" target="_blank" rel="noopener">Open published Instagram post</a></div>` : '';
                     showPublishResult(
                         'success',
-                        `<div><strong>instagram_content_publish approved demo:</strong> post published successfully.</div>${mediaLine}${containerLine}${linkLine}`
+                        `<div><strong>instagram_content_publish approved demo:</strong> post published successfully.</div>${sourceLine}${uploadedLine}${mediaLine}${containerLine}${linkLine}`
                     );
                 } else {
                     showPublishResult('error', data.error || 'Could not publish Instagram content.');

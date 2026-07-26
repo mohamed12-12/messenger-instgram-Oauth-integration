@@ -22,6 +22,7 @@ from flask import Flask, request, jsonify, render_template, redirect, url_for, s
 from collections import deque
 import hmac as hmac_module
 from dotenv import load_dotenv
+from werkzeug.utils import secure_filename
 
 # -----------------------------------------------------------------------------
 # Environment and application setup
@@ -34,6 +35,7 @@ META_APP_SECRET = os.getenv('META_APP_SECRET')
 REDIRECT_URI    = os.getenv('REDIRECT_URI')
 VERIFY_TOKEN    = os.getenv('VERIFY_TOKEN', 'nanovate_messenger_verify_2026')
 SECRET_KEY      = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_123')
+APP_BASE_URL    = os.getenv('APP_BASE_URL', '').rstrip('/')
 
 # Instagram-specific configuration
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
@@ -49,6 +51,8 @@ WHATSAPP_SCOPES = 'business_management,whatsapp_business_management,whatsapp_bus
 # Flask app initialization
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.config['INSTAGRAM_UPLOAD_FOLDER'] = os.path.join(app.root_path, 'static', 'uploads', 'instagram')
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_UPLOAD_MB', '8')) * 1024 * 1024
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1197,6 +1201,42 @@ def get_instagram_page_token(ig_account_id=None):
 def send_instagram_message(recipient_id: str, text: str, page_access_token: str):
     return send_graph_message(recipient_id, text, page_access_token)
 
+ALLOWED_INSTAGRAM_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png'}
+
+def is_allowed_instagram_image(filename: str) -> bool:
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_INSTAGRAM_IMAGE_EXTENSIONS
+
+def build_public_static_url(filename: str) -> str:
+    static_path = f'uploads/instagram/{filename}'
+    if APP_BASE_URL:
+        return f'{APP_BASE_URL}/static/{static_path}'
+
+    generated = url_for('static', filename=static_path, _external=True)
+    if request.headers.get('X-Forwarded-Proto') == 'https' and generated.startswith('http://'):
+        generated = 'https://' + generated[len('http://'):]
+    return generated
+
+def save_instagram_image_upload(uploaded_file) -> dict:
+    original_filename = secure_filename(uploaded_file.filename or '')
+    if not original_filename:
+        raise ValueError('Uploaded image is missing a filename.')
+    if not is_allowed_instagram_image(original_filename):
+        raise ValueError('Upload a JPG or PNG image for Instagram publishing.')
+    if uploaded_file.mimetype and not uploaded_file.mimetype.startswith('image/'):
+        raise ValueError('Uploaded file must be an image.')
+
+    extension = original_filename.rsplit('.', 1)[1].lower()
+    stored_filename = f'{uuid.uuid4().hex}.{extension}'
+    os.makedirs(app.config['INSTAGRAM_UPLOAD_FOLDER'], exist_ok=True)
+    stored_path = os.path.join(app.config['INSTAGRAM_UPLOAD_FOLDER'], stored_filename)
+    uploaded_file.save(stored_path)
+
+    return {
+        'filename': stored_filename,
+        'original_filename': original_filename,
+        'image_url': build_public_static_url(stored_filename)
+    }
+
 def publish_instagram_image(ig_account_id: str, image_url: str, caption: str, page_access_token: str) -> dict:
     container = graph_post(
         f'{ig_account_id}/media',
@@ -1208,7 +1248,7 @@ def publish_instagram_image(ig_account_id: str, image_url: str, caption: str, pa
     )
     creation_id = container.get('id')
     if not creation_id:
-        raise ValueError('Meta did not return an Instagram media container ID.')
+        raise RuntimeError('Meta did not return an Instagram media container ID.')
 
     published = graph_post(
         f'{ig_account_id}/media_publish',
@@ -2249,6 +2289,8 @@ def instagram_publish():
     ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
     image_url = (data.get('image_url') or '').strip()
     caption = (data.get('caption') or '').strip()
+    uploaded_file = request.files.get('image_file')
+    has_upload = bool(uploaded_file and uploaded_file.filename)
 
     if not ig_account_id:
         return jsonify({'success': False, 'error': 'No Instagram account is connected.'}), 400
@@ -2257,12 +2299,12 @@ def instagram_publish():
     if session_ig_account_id and session_ig_account_id != ig_account_id:
         return jsonify({'success': False, 'error': 'Selected Instagram account does not match the connected session.'}), 403
 
-    if not image_url:
+    if not image_url and not has_upload:
         return jsonify({
             'success': False,
-            'error': 'Image URL is required. Instagram content publishing creates media posts, so caption-only posts are not supported.'
+            'error': 'Upload an image or provide an image URL. Instagram content publishing creates media posts, so caption-only posts are not supported.'
         }), 400
-    if not image_url.lower().startswith(('https://', 'http://')):
+    if image_url and not image_url.lower().startswith(('https://', 'http://')):
         return jsonify({'success': False, 'error': 'Use a public HTTP or HTTPS image URL that Meta can access.'}), 400
     if len(caption) > 2200:
         return jsonify({'success': False, 'error': 'Instagram captions must be 2200 characters or fewer.'}), 400
@@ -2273,14 +2315,23 @@ def instagram_publish():
         return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
 
     try:
+        upload_context = None
+        image_source = 'url'
+        if has_upload:
+            upload_context = save_instagram_image_upload(uploaded_file)
+            image_url = upload_context['image_url']
+            image_source = 'upload'
+
         result = publish_instagram_image(ig_account_id, image_url, caption, token)
         logger.info("Instagram media published for account %s media=%s", ig_account_id, result.get('media_id'))
         return jsonify({
             'success': True,
             'permission_used': 'instagram_content_publish',
             'ig_account_id': ig_account_id,
+            'image_source': image_source,
             'image_url': image_url,
             'caption': caption,
+            'uploaded_file': upload_context,
             **result
         })
     except requests.HTTPError as e:
@@ -2288,6 +2339,8 @@ def instagram_publish():
         error_message, status_code = format_graph_api_error(e, 'Could not publish Instagram content.')
         return jsonify({'success': False, 'error': error_message}), status_code
     except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except RuntimeError as e:
         return jsonify({'success': False, 'error': str(e)}), 502
     except Exception:
         logger.exception("Unexpected error while publishing Instagram content for %s", ig_account_id)

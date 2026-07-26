@@ -30,3 +30,7 @@ env/
 # Project Logs
 PROJECT_LOG.md
 instgram.md
+
+# Runtime uploads
+static/uploads/instagram/*
+!static/uploads/instagram/.gitkeep

@@ -47,7 +47,7 @@ This project is useful if you need:
 - Receive Instagram webhook events
 - View recent Instagram conversation events in the dashboard
 - Send manual outbound Instagram messages to a recipient PSID
-- Publish image posts with captions for `instagram_content_publish` review
+- Upload and publish image posts with captions for `instagram_content_publish` review
 - Manage Instagram comments from the comments dashboard
 
 ### WhatsApp
@@ -145,7 +145,7 @@ The other URL-style env vars are documentation-friendly deployment references fo
 4. The app searches for a page with `instagram_business_account`
 5. The Instagram account ID and page token are stored locally
 6. Open `/instagram/dashboard/<ig_account_id>` to manage messaging
-7. Use `Publish Instagram Post` with a public image URL and caption to show the `instagram_content_publish` review flow
+7. Use `Publish Instagram Post` with an uploaded image and caption to show the `instagram_content_publish` review flow
 8. Open `/instagram/comments/<ig_account_id>` to manage comments
 
 ### WhatsApp connection flow
