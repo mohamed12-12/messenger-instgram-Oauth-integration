@@ -134,6 +134,7 @@ The other URL-style env vars are documentation-friendly deployment references fo
 7. Use `Refresh Comments` to show the `pages_read_user_content` review flow
 8. Use `Publish Post` to show the `pages_manage_posts` review flow
 9. Use `Refresh Engagement` to show the `pages_read_engagement` review flow
+10. Use `Refresh Insights` to show the `read_insights` review flow
 
 ### Instagram connection flow
 

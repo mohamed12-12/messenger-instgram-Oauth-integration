@@ -59,7 +59,7 @@ GRAPH_VERSION = 'v22.0'
 GRAPH_BASE    = f'https://graph.facebook.com/{GRAPH_VERSION}'
 
 # OAuth scopes required by the app
-SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_read_user_content,pages_manage_engagement,pages_manage_posts,pages_show_list,business_management'
+SCOPES = 'pages_messaging,pages_manage_metadata,pages_read_engagement,pages_read_user_content,pages_manage_engagement,pages_manage_posts,read_insights,pages_show_list,business_management'
 NO_BUSINESS_PORTFOLIO_MESSAGE = (
     'No Business Portfolio was returned by Meta for this user. '
     'Please set up a Business Manager / Business Portfolio first, make sure you are an admin, '
@@ -997,6 +997,113 @@ def fetch_page_engagement_summary(page_id: str, page_access_token: str) -> dict:
         }
     }
 
+def normalize_insight_value(metric: dict):
+    values = metric.get('values') or []
+    if not values:
+        return None
+    latest = values[-1]
+    value = latest.get('value')
+    if isinstance(value, dict):
+        return sum(v for v in value.values() if isinstance(v, (int, float)))
+    return value
+
+def fetch_insight_metric(object_id: str, metric: str, access_token: str, period: str = 'day') -> dict:
+    payload = graph_get(f'{object_id}/insights', {
+        'metric': metric,
+        'period': period,
+        'access_token': access_token
+    })
+    item = (payload.get('data') or [{}])[0]
+    return {
+        'name': item.get('name') or metric,
+        'title': item.get('title') or metric.replace('_', ' ').title(),
+        'description': item.get('description') or '',
+        'period': item.get('period') or period,
+        'value': normalize_insight_value(item),
+        'values': item.get('values') or []
+    }
+
+def try_fetch_insight_metric(object_id: str, metric: str, access_token: str, period: str = 'day') -> dict:
+    try:
+        result = fetch_insight_metric(object_id, metric, access_token, period)
+        result['available'] = True
+        result['error'] = None
+        return result
+    except requests.HTTPError as exc:
+        logger.warning("Insight metric %s failed for %s: %s", metric, object_id, extract_graph_api_error_message(exc))
+        return {
+            'name': metric,
+            'title': metric.replace('_', ' ').title(),
+            'description': '',
+            'period': period,
+            'value': None,
+            'values': [],
+            'available': False,
+            'error': 'Metric unavailable for this Page or token.'
+        }
+    except Exception as exc:
+        logger.warning("Insight metric %s failed for %s: %s", metric, object_id, exc)
+        return {
+            'name': metric,
+            'title': metric.replace('_', ' ').title(),
+            'description': '',
+            'period': period,
+            'value': None,
+            'values': [],
+            'available': False,
+            'error': 'Metric unavailable for this Page or token.'
+        }
+
+def fetch_page_insights_summary(page_id: str, page_access_token: str) -> dict:
+    page_metrics = [
+        'page_post_engagements',
+        'page_actions_post_reactions_total',
+        'page_actions_post_reactions_like_total',
+        'page_actions_post_reactions_love_total'
+    ]
+    page_insights = [
+        try_fetch_insight_metric(page_id, metric, page_access_token)
+        for metric in page_metrics
+    ]
+
+    posts = graph_get(f'{page_id}/feed', {
+        'fields': 'id,message,story,created_time,permalink_url',
+        'limit': 5,
+        'access_token': page_access_token
+    }).get('data', [])
+
+    post_insight_metrics = [
+        'post_activity_by_action_type',
+        'post_clicks_by_type',
+        'post_reactions_by_type_total'
+    ]
+    post_insights = []
+    for post in posts:
+        post_id = post.get('id')
+        metrics = []
+        if post_id:
+            metrics = [
+                try_fetch_insight_metric(post_id, metric, page_access_token)
+                for metric in post_insight_metrics
+            ]
+        post_insights.append({
+            'post_id': post_id,
+            'post_text': post.get('message') or post.get('story') or '[no post text]',
+            'created_time': post.get('created_time'),
+            'permalink_url': post.get('permalink_url'),
+            'metrics': metrics
+        })
+
+    return {
+        'page': {
+            'id': page_id,
+            'name': get_saved_page_name(page_id) or f'Page {page_id}'
+        },
+        'page_metrics': page_insights,
+        'post_insights': post_insights,
+        'available_metric_count': sum(1 for metric in page_insights if metric.get('available'))
+    }
+
 def fetch_page_picture_url(page_id: str, page_access_token: str) -> str:
     if not page_id or not page_access_token:
         return None
@@ -1195,6 +1302,7 @@ def meta_oauth_debug():
         'messenger_pages_read_user_content_requested': 'pages_read_user_content' in SCOPES.split(','),
         'messenger_pages_manage_engagement_requested': 'pages_manage_engagement' in SCOPES.split(','),
         'messenger_pages_manage_posts_requested': 'pages_manage_posts' in SCOPES.split(','),
+        'messenger_read_insights_requested': 'read_insights' in SCOPES.split(','),
         'instagram_business_management_requested': 'business_management' in INSTAGRAM_SCOPES.split(','),
         'selected_business_id': business_id,
         'selected_business_name': business_name,
@@ -2420,6 +2528,38 @@ def page_engagement_api():
     except Exception:
         logger.exception("Reading Page engagement failed for page %s.", page_id)
         return jsonify({'success': False, 'error': 'Could not read Facebook Page engagement.', 'permission_used': 'pages_read_engagement'}), 500
+
+@app.route('/api/page-insights')
+def page_insights_api():
+    page_id = request.args.get('page_id') or session.get('connected_page_id')
+    page_token = get_connected_page_token(page_id)
+    connected_session_page_id = session.get('connected_page_id')
+
+    if not page_id:
+        return jsonify({'success': False, 'error': 'No Facebook Page is connected. Please connect Facebook first.'}), 400
+    if connected_session_page_id and connected_session_page_id != page_id:
+        return jsonify({'success': False, 'error': 'This Facebook Page is not connected in your current session.'}), 403
+    if not page_token:
+        return jsonify({'success': False, 'error': 'Facebook authorization has expired. Please reconnect your account.'}), 401
+
+    try:
+        insights = fetch_page_insights_summary(page_id, page_token)
+        return jsonify({
+            'success': True,
+            'page_id': page_id,
+            'page_name': insights['page']['name'],
+            'insights': insights,
+            'permission_used': 'read_insights',
+            'synced_at': int(time.time())
+        })
+    except requests.HTTPError as e:
+        message, status_code = format_graph_api_error(e, 'Could not read Facebook Page insights.')
+        if status_code == 403:
+            message = 'Nanovate does not currently have permission to retrieve Page insights.'
+        return jsonify({'success': False, 'error': message, 'permission_used': 'read_insights'}), status_code
+    except Exception:
+        logger.exception("Reading Page insights failed for page %s.", page_id)
+        return jsonify({'success': False, 'error': 'Could not read Facebook Page insights.', 'permission_used': 'read_insights'}), 500
 
 @app.route('/api/page-user-comment/delete', methods=['POST'])
 def delete_page_user_comment_api():

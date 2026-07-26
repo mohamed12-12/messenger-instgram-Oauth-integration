@@ -449,6 +449,39 @@
             margin-top: 12px;
         }
 
+        .insights-panel {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            margin: 18px 0;
+            padding: 14px;
+        }
+
+        .insight-metric {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 12px;
+        }
+
+        .insight-metric.is-unavailable {
+            background: #fff7ed;
+            border-color: #fed7aa;
+        }
+
+        .insight-name {
+            color: var(--text-main);
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .insight-value {
+            color: var(--primary);
+            font-size: 22px;
+            font-weight: 900;
+            margin-top: 6px;
+        }
+
         .engagement-row {
             background: #f9fafb;
             border: 1px solid #e5e7eb;
@@ -886,6 +919,20 @@
                         </div>
                         <div id="page-engagement-list" class="engagement-list"></div>
                     </div>
+                    <div class="insights-panel">
+                        <div class="engagement-header">
+                            <div>
+                                <h3>Page Insights</h3>
+                                <p class="hint">Meta permission shown: <code>read_insights</code> reads analytics metrics for the connected Facebook Page.</p>
+                            </div>
+                            <button type="button" class="btn-tool" id="load-page-insights">
+                                Refresh Insights
+                            </button>
+                        </div>
+                        <div id="page-insights-result" class="result-box"></div>
+                        <div class="engagement-grid" id="page-insights-metrics"></div>
+                        <div id="post-insights-list" class="engagement-list"></div>
+                    </div>
                     <div id="page-user-content-result" class="result-box"></div>
                     <div class="content-stats">
                         <div class="stat-card">
@@ -978,6 +1025,10 @@
         const loadPageEngagementBtn = document.getElementById('load-page-engagement');
         const pageEngagementResult = document.getElementById('page-engagement-result');
         const pageEngagementList = document.getElementById('page-engagement-list');
+        const loadPageInsightsBtn = document.getElementById('load-page-insights');
+        const pageInsightsResult = document.getElementById('page-insights-result');
+        const pageInsightsMetrics = document.getElementById('page-insights-metrics');
+        const postInsightsList = document.getElementById('post-insights-list');
         const engagementCountEls = {
             followers: document.getElementById('page-followers-count'),
             fans: document.getElementById('page-fans-count'),
@@ -1030,6 +1081,12 @@
             pageEngagementResult.style.display = 'block';
             pageEngagementResult.className = `result-box ${success ? 'result-success' : 'result-error'}`;
             pageEngagementResult.textContent = message;
+        }
+
+        function showInsightsResult(success, message) {
+            pageInsightsResult.style.display = 'block';
+            pageInsightsResult.className = `result-box ${success ? 'result-success' : 'result-error'}`;
+            pageInsightsResult.textContent = message;
         }
 
         function formatCount(value) {
@@ -1093,6 +1150,75 @@
                 }
 
                 pageEngagementList.appendChild(row);
+            });
+        }
+
+        function renderInsightMetric(container, metric) {
+            const card = document.createElement('div');
+            card.className = `insight-metric ${metric.available ? '' : 'is-unavailable'}`;
+
+            const name = document.createElement('div');
+            name.className = 'insight-name';
+            setText(name, metric.title || metric.name || 'Insight metric');
+
+            const value = document.createElement('div');
+            value.className = 'insight-value';
+            setText(value, metric.available ? formatCount(metric.value) : 'N/A');
+
+            const meta = document.createElement('div');
+            meta.className = 'simple-meta';
+            setText(meta, metric.available ? `${metric.name || ''} | ${metric.period || 'day'}` : (metric.error || 'Metric unavailable.'));
+
+            card.appendChild(name);
+            card.appendChild(value);
+            card.appendChild(meta);
+            container.appendChild(card);
+        }
+
+        function renderPageInsights(metrics) {
+            pageInsightsMetrics.innerHTML = '';
+            if (!metrics.length) {
+                renderEmpty(pageInsightsMetrics, 'No Facebook Page insights were returned.');
+                return;
+            }
+            metrics.forEach(metric => renderInsightMetric(pageInsightsMetrics, metric));
+        }
+
+        function renderPostInsights(posts) {
+            postInsightsList.innerHTML = '';
+            if (!posts.length) {
+                renderEmpty(postInsightsList, 'No recent post insights were returned.');
+                return;
+            }
+
+            posts.forEach(post => {
+                const row = document.createElement('div');
+                row.className = 'engagement-row';
+
+                const meta = document.createElement('div');
+                meta.className = 'simple-meta';
+                const created = post.created_time ? new Date(post.created_time).toLocaleString() : 'Unknown time';
+                setText(meta, `${created} | Post ID: ${post.post_id || 'Unknown'}`);
+                row.appendChild(meta);
+
+                addExpandableText(row, 'simple-text', post.post_text || '[no post text]');
+
+                const metricWrap = document.createElement('div');
+                metricWrap.className = 'engagement-grid';
+                (post.metrics || []).forEach(metric => renderInsightMetric(metricWrap, metric));
+                row.appendChild(metricWrap);
+
+                if (post.permalink_url) {
+                    const link = document.createElement('a');
+                    link.className = 'comment-link';
+                    link.href = post.permalink_url;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    setText(link, 'Open post on Facebook');
+                    row.appendChild(link);
+                }
+
+                postInsightsList.appendChild(row);
             });
         }
 
@@ -1562,6 +1688,30 @@
             } finally {
                 loadPageEngagementBtn.disabled = false;
                 loadPageEngagementBtn.textContent = 'Refresh Engagement';
+            }
+        };
+
+        loadPageInsightsBtn.onclick = async () => {
+            loadPageInsightsBtn.disabled = true;
+            loadPageInsightsBtn.textContent = 'Loading...';
+            pageInsightsMetrics.innerHTML = '';
+            postInsightsList.innerHTML = '';
+            try {
+                const response = await fetch(`/api/page-insights?page_id=${encodeURIComponent(connectedPageId || '')}`);
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showInsightsResult(false, data.error || 'Could not read Facebook Page insights.');
+                    return;
+                }
+
+                renderPageInsights(data.insights?.page_metrics || []);
+                renderPostInsights(data.insights?.post_insights || []);
+                showInsightsResult(true, `Loaded Page insights for ${data.page_name}.`);
+            } catch (err) {
+                showInsightsResult(false, 'Meta API request failed. Please try again.');
+            } finally {
+                loadPageInsightsBtn.disabled = false;
+                loadPageInsightsBtn.textContent = 'Refresh Insights';
             }
         };
 
