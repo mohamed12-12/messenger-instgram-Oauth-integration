@@ -39,7 +39,7 @@ APP_BASE_URL    = os.getenv('APP_BASE_URL', '').rstrip('/')
 
 # Instagram-specific configuration
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI')
-INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata,business_management'
+INSTAGRAM_SCOPES = 'instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_manage_engagement,instagram_content_publish,pages_messaging,pages_read_engagement,pages_show_list,pages_manage_metadata,business_management'
 
 # WhatsApp-specific configuration
 WHATSAPP_APP_ID = os.getenv('WHATSAPP_APP_ID')
@@ -1384,6 +1384,7 @@ def meta_oauth_debug():
         'messenger_pages_manage_posts_requested': 'pages_manage_posts' in SCOPES.split(','),
         'messenger_read_insights_requested': 'read_insights' in SCOPES.split(','),
         'instagram_business_management_requested': 'business_management' in INSTAGRAM_SCOPES.split(','),
+        'instagram_manage_engagement_requested': 'instagram_manage_engagement' in INSTAGRAM_SCOPES.split(','),
         'instagram_content_publish_requested': 'instagram_content_publish' in INSTAGRAM_SCOPES.split(','),
         'selected_business_id': business_id,
         'selected_business_name': business_name,
@@ -2282,6 +2283,82 @@ def instagram_delete_comment():
     except Exception:
         logger.exception("Unexpected error while deleting Instagram comment %s", comment_id)
         return jsonify({'success': False, 'error': 'Failed to delete Instagram comment.'}), 500
+
+@app.route('/api/instagram/like-comment', methods=['POST'])
+def instagram_like_comment():
+    data = request.get_json(silent=True) or request.form
+    ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
+    comment_id = (data.get('comment_id') or '').strip()
+
+    if not ig_account_id:
+        return jsonify({'success': False, 'error': 'Missing Instagram account ID.'}), 400
+    if not comment_id:
+        return jsonify({'success': False, 'error': 'Comment ID is required.'}), 400
+
+    token = get_instagram_page_token(ig_account_id)
+    if not token:
+        logger.warning("Instagram comment like failed: missing token for account %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
+
+    try:
+        result = graph_post(
+            f'{ig_account_id}/user_likes',
+            params={'access_token': token},
+            data={'comment_id': comment_id}
+        )
+        logger.info("Instagram comment liked for account %s comment %s", ig_account_id, comment_id)
+        return jsonify({
+            'success': True,
+            'permission_used': 'instagram_manage_engagement',
+            'object_type': 'comment',
+            'action': 'like',
+            'result': result
+        })
+    except requests.HTTPError as e:
+        error_message, status_code = format_graph_api_error(e, 'Failed to like Instagram comment.')
+        return jsonify({'success': False, 'error': error_message}), status_code
+    except Exception:
+        logger.exception("Unexpected error while liking Instagram comment %s", comment_id)
+        return jsonify({'success': False, 'error': 'Failed to like Instagram comment.'}), 500
+
+@app.route('/api/instagram/unlike-comment', methods=['POST'])
+def instagram_unlike_comment():
+    data = request.get_json(silent=True) or request.form
+    ig_account_id = data.get('ig_account_id') or session.get('instagram_account_id')
+    comment_id = (data.get('comment_id') or '').strip()
+
+    if not ig_account_id:
+        return jsonify({'success': False, 'error': 'Missing Instagram account ID.'}), 400
+    if not comment_id:
+        return jsonify({'success': False, 'error': 'Comment ID is required.'}), 400
+
+    token = get_instagram_page_token(ig_account_id)
+    if not token:
+        logger.warning("Instagram comment unlike failed: missing token for account %s", ig_account_id)
+        return jsonify({'success': False, 'error': 'No Instagram page token found. Please reconnect your account.'}), 401
+
+    try:
+        result = graph_delete(
+            f'{ig_account_id}/user_likes',
+            params={
+                'access_token': token,
+                'comment_id': comment_id
+            }
+        )
+        logger.info("Instagram comment unliked for account %s comment %s", ig_account_id, comment_id)
+        return jsonify({
+            'success': True,
+            'permission_used': 'instagram_manage_engagement',
+            'object_type': 'comment',
+            'action': 'unlike',
+            'result': result
+        })
+    except requests.HTTPError as e:
+        error_message, status_code = format_graph_api_error(e, 'Failed to unlike Instagram comment.')
+        return jsonify({'success': False, 'error': error_message}), status_code
+    except Exception:
+        logger.exception("Unexpected error while unliking Instagram comment %s", comment_id)
+        return jsonify({'success': False, 'error': 'Failed to unlike Instagram comment.'}), 500
 
 @app.route('/api/instagram/publish', methods=['POST'])
 def instagram_publish():

@@ -89,6 +89,7 @@ Instagram flow requests:
 - `instagram_basic`
 - `instagram_manage_messages`
 - `instagram_manage_comments`
+- `instagram_manage_engagement`
 - `instagram_content_publish`
 - `pages_messaging`
 - `pages_read_engagement`
@@ -194,6 +195,7 @@ URL:
 Use it to:
 
 - Load recent comments
+- Like and unlike comments for App Review testing of `instagram_manage_engagement`
 - Reply to comments
 - Hide comments
 - Delete comments

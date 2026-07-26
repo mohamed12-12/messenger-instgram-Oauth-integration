@@ -118,6 +118,16 @@
             padding: 24px;
         }
 
+        .permission-note {
+            background: #FFF7ED;
+            border: 1px solid #FED7AA;
+            color: #9A3412;
+            border-radius: 14px;
+            padding: 16px 18px;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
         .comments-head {
             display: flex;
             justify-content: space-between;
@@ -204,7 +214,7 @@
 
         .actions {
             display: grid;
-            grid-template-columns: 1fr auto auto auto;
+            grid-template-columns: 1fr auto auto auto auto;
             gap: 10px;
             align-items: center;
         }
@@ -238,6 +248,16 @@
         .btn-delete {
             background: #DC2626;
             color: white;
+        }
+
+        .btn-like {
+            background: #DBEAFE;
+            color: #1D4ED8;
+        }
+
+        .btn-unlike {
+            background: #E0E7FF;
+            color: #4338CA;
         }
 
         .btn:disabled {
@@ -313,6 +333,9 @@
         {% endif %}
 
         <div class="comments-shell">
+            <div class="permission-note">
+                Meta permissions shown here: <code>instagram_manage_comments</code> for reply, hide, and delete, plus <code>instagram_manage_engagement</code> for Like and Unlike on Instagram comments through the Graph API.
+            </div>
             <div class="comments-head">
                 <h2>Comments Inbox</h2>
                 <button type="button" onclick="fetchComments()">Refresh</button>
@@ -378,6 +401,8 @@
                                         id="reply-input-${escapeHtml(comment.comment_id)}"
                                         placeholder="Write a public reply..."
                                     >
+                                    <button class="btn btn-like" type="button" onclick="likeComment('${escapeHtml(comment.comment_id)}')">Like</button>
+                                    <button class="btn btn-unlike" type="button" onclick="unlikeComment('${escapeHtml(comment.comment_id)}')">Unlike</button>
                                     <button class="btn btn-reply" type="button" onclick="replyToComment('${escapeHtml(comment.comment_id)}')">Reply</button>
                                     <button class="btn btn-hide" type="button" onclick="hideComment('${escapeHtml(comment.comment_id)}')">Hide</button>
                                     <button class="btn btn-delete" type="button" onclick="deleteComment('${escapeHtml(comment.comment_id)}')">Delete</button>
@@ -452,6 +477,74 @@
                 status.style.color = '#059669';
             } catch (error) {
                 status.textContent = 'Network error while replying.';
+                status.style.color = '#DC2626';
+            } finally {
+                setCommentActionState(commentId, false);
+            }
+        }
+
+        async function likeComment(commentId) {
+            const status = document.getElementById(`status-${commentId}`);
+            status.textContent = 'Sending like via Graph API...';
+            status.style.color = '#6B7280';
+            setCommentActionState(commentId, true);
+
+            try {
+                const response = await fetch('/api/instagram/like-comment', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        ig_account_id: connectedInstagramId,
+                        comment_id: commentId
+                    })
+                });
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    status.textContent = data.error || 'Like failed.';
+                    status.style.color = '#DC2626';
+                    setCommentActionState(commentId, false);
+                    return;
+                }
+
+                status.textContent = 'Comment liked successfully.';
+                status.style.color = '#059669';
+            } catch (error) {
+                status.textContent = 'Network error while liking comment.';
+                status.style.color = '#DC2626';
+            } finally {
+                setCommentActionState(commentId, false);
+            }
+        }
+
+        async function unlikeComment(commentId) {
+            const status = document.getElementById(`status-${commentId}`);
+            status.textContent = 'Removing like via Graph API...';
+            status.style.color = '#6B7280';
+            setCommentActionState(commentId, true);
+
+            try {
+                const response = await fetch('/api/instagram/unlike-comment', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        ig_account_id: connectedInstagramId,
+                        comment_id: commentId
+                    })
+                });
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    status.textContent = data.error || 'Unlike failed.';
+                    status.style.color = '#DC2626';
+                    setCommentActionState(commentId, false);
+                    return;
+                }
+
+                status.textContent = 'Comment unliked successfully.';
+                status.style.color = '#059669';
+            } catch (error) {
+                status.textContent = 'Network error while unliking comment.';
                 status.style.color = '#DC2626';
             } finally {
                 setCommentActionState(commentId, false);

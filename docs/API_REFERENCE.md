@@ -176,6 +176,34 @@ Request body or form fields:
 - `ig_account_id`
 - `comment_id`
 
+### Like comment
+
+- `POST /api/instagram/like-comment`
+
+Request body or form fields:
+
+- `ig_account_id`
+- `comment_id`
+
+Purpose:
+
+- sends a Graph API Like request for an Instagram comment
+- demonstrates the `instagram_manage_engagement` permission for Meta App Review
+
+### Unlike comment
+
+- `POST /api/instagram/unlike-comment`
+
+Request body or form fields:
+
+- `ig_account_id`
+- `comment_id`
+
+Purpose:
+
+- sends a Graph API Unlike request for an Instagram comment
+- demonstrates the `instagram_manage_engagement` permission for Meta App Review
+
 ## Read APIs
 
 ### Messenger recent page messages
