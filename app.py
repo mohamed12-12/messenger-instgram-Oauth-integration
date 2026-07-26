@@ -2302,7 +2302,7 @@ def instagram_like_comment():
 
     try:
         result = graph_post(
-            f'{ig_account_id}/user_likes',
+            f'{ig_account_id}/likes',
             params={'access_token': token},
             data={'comment_id': comment_id}
         )
@@ -2339,7 +2339,7 @@ def instagram_unlike_comment():
 
     try:
         result = graph_delete(
-            f'{ig_account_id}/user_likes',
+            f'{ig_account_id}/likes',
             params={
                 'access_token': token,
                 'comment_id': comment_id
